@@ -407,7 +407,7 @@ function AuthScreen({ mode, setMode, onSuccess, showToast }: { mode: 'login' | '
       if (familyError) { showToast('Erro ao criar família', 'error'); setLoading(false); return }
       
       await supabase.from('family_members').insert({ family_id: familyData.id, user_id: authData.user.id, name, role: 'owner', email, avatar: '👨', color: '#667EEA' })
-      showToast('Família criada!')
+      showToast('Família criada!', 'success')
       onSuccess()
     } else {
       const { data: authData, error: authError } = await supabase.auth.signUp({ email, password })
@@ -417,7 +417,7 @@ function AuthScreen({ mode, setMode, onSuccess, showToast }: { mode: 'login' | '
       if (!familyData) { showToast('Código inválido', 'error'); setLoading(false); return }
       
       await supabase.from('family_members').insert({ family_id: familyData.id, user_id: authData.user.id, name, role: 'member', email, avatar: '👤', color: '#4CAF50' })
-      showToast('Você entrou na família!')
+      showToast('Você entrou na família!', 'success')
       onSuccess()
     }
     setLoading(false)
