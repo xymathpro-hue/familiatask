@@ -2,14 +2,13 @@
 
 import React, { useState, useEffect } from 'react'
 import { 
-  Home, Users, Calendar, Settings, Plus, Check, Clock, Star,
-  ChevronLeft, ChevronRight, Bell, Trash2, Edit3, Copy, RefreshCw,
-  Shield, ShieldCheck, Crown, UserPlus, UserMinus, Eye,
+  Home, Users, Settings, Plus, Check, Calendar, Star,
+  Bell, Trash2, Edit3, Copy, Eye,
+  ShieldCheck, Crown,
   LogOut, Share2, AlertCircle, CheckCircle, X, Mail, Lock, User
 } from 'lucide-react'
 import { supabase, Family, FamilyMember, Task, Category, TaskAssignment } from '@/lib/supabase'
 
-// Constantes
 const MEMBER_ROLES = {
   owner: { label: 'Dono', icon: Crown, color: '#FFD700' },
   admin: { label: 'Admin', icon: ShieldCheck, color: '#667EEA' },
@@ -22,9 +21,6 @@ const STATUS_CONFIG = {
   in_progress: { label: 'Em Andamento', color: '#2196F3', bg: '#E3F2FD' },
   completed: { label: 'Concluída', color: '#4CAF50', bg: '#E8F5E9' }
 }
-
-const AVATARS = ['👨', '👩', '👦', '👧', '👴', '👵', '🧑', '👶', '🧔', '👱‍♀️']
-const COLORS = ['#667EEA', '#E85D75', '#58C9B9', '#F5A623', '#9C27B0', '#4CAF50', '#FF5722', '#795548']
 
 export default function FamiliaTaskApp() {
   const [user, setUser] = useState<any>(null)
@@ -90,7 +86,6 @@ export default function FamiliaTaskApp() {
           .order('created_at', { ascending: false })
         if (tasksData) setTasks(tasksData)
 
-        // Realtime
         supabase
           .channel('family-changes')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `family_id=eq.${memberData.family_id}` }, () => loadFamilyData(userId))
@@ -107,7 +102,6 @@ export default function FamiliaTaskApp() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  const isOwner = currentMember?.role === 'owner'
   const isAdmin = ['owner', 'admin'].includes(currentMember?.role || '')
 
   const copyInviteCode = async () => {
@@ -153,7 +147,6 @@ export default function FamiliaTaskApp() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
-      {/* Header */}
       <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-xl border-b border-white/10 safe-area-pt">
         <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -179,7 +172,6 @@ export default function FamiliaTaskApp() {
         </div>
       </header>
 
-      {/* Main */}
       <main className="max-w-lg mx-auto px-4 pb-24">
         {activeTab === 'tasks' && (
           <div className="py-4 space-y-4">
@@ -233,7 +225,7 @@ export default function FamiliaTaskApp() {
                             {task.priority === 'high' && <Star className="w-4 h-4 text-amber-400 fill-amber-400" />}
                           </div>
                           <div className="flex flex-wrap items-center gap-2 text-xs text-white/60">
-                            {task.due_date && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{new Date(task.due_date).toLocaleDateString('pt-BR')}{task.due_time && ` ${task.due_time}`}</span>}
+                            {task.due_date && <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />{new Date(task.due_date).toLocaleDateString('pt-BR')}</span>}
                             {task.has_reminder && <span className="flex items-center gap-1 text-amber-400"><Bell className="w-3 h-3" />Lembrete</span>}
                           </div>
                           <div className="flex items-center gap-2 mt-2">
@@ -323,7 +315,6 @@ export default function FamiliaTaskApp() {
         )}
       </main>
 
-      {/* Nav */}
       <nav className="fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur-xl border-t border-white/10 safe-area-pb">
         <div className="max-w-lg mx-auto flex">
           {[{ id: 'tasks', icon: Check, label: 'Tarefas' }, { id: 'family', icon: Users, label: 'Família' }, { id: 'settings', icon: Settings, label: 'Config' }].map(tab => (
@@ -334,23 +325,19 @@ export default function FamiliaTaskApp() {
         </div>
       </nav>
 
-      {/* FAB */}
       {activeTab === 'tasks' && currentMember?.role !== 'visitor' && (
         <button onClick={() => { setEditingTask(null); setShowTaskModal(true) }} className="fixed bottom-20 right-4 w-14 h-14 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 shadow-lg flex items-center justify-center">
           <Plus className="w-7 h-7 text-white" />
         </button>
       )}
 
-      {/* Task Modal */}
       {showTaskModal && (
         <TaskModal
           task={editingTask}
           categories={categories}
-          members={members}
-          currentMember={currentMember}
           familyId={family.id}
           isAdmin={isAdmin}
-          onSave={async (taskData: any) =>
+          onSave={async (taskData: any) => {
             if (editingTask) {
               await supabase.from('tasks').update(taskData).eq('id', editingTask.id)
             } else {
@@ -372,7 +359,6 @@ export default function FamiliaTaskApp() {
         />
       )}
 
-      {/* Code Modal */}
       {showCodeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
           <div className="w-full max-w-sm p-6 rounded-3xl bg-slate-800 border border-white/10">
@@ -387,7 +373,6 @@ export default function FamiliaTaskApp() {
         </div>
       )}
 
-      {/* Toast */}
       {toast && (
         <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 ${toast.type === 'error' ? 'bg-red-500' : 'bg-green-500'}`}>
           {toast.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
@@ -398,7 +383,6 @@ export default function FamiliaTaskApp() {
   )
 }
 
-// Auth Screen
 function AuthScreen({ mode, setMode, onSuccess, showToast }: { mode: 'login' | 'register' | 'join'; setMode: (m: any) => void; onSuccess: () => void; showToast: (m: string, t: 'success' | 'error') => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -419,19 +403,20 @@ function AuthScreen({ mode, setMode, onSuccess, showToast }: { mode: 'login' | '
       const { data: authData, error: authError } = await supabase.auth.signUp({ email, password })
       if (authError || !authData.user) { showToast(authError?.message || 'Erro', 'error'); setLoading(false); return }
       
-      const { data: familyData, error: familyError } = await supabase.from('families').insert({ name: familyName, owner_id: authData.user.id, invite_code: '' }).select().single()
+      const { data: familyData, error: familyError } = await supabase.from('families').insert({ name: familyName, owner_id: authData.user.id }).select().single()
       if (familyError) { showToast('Erro ao criar família', 'error'); setLoading(false); return }
       
-      await supabase.from('family_members').insert({ family_id: familyData.id, user_id: authData.user.id, name, role: 'owner', email })
+      await supabase.from('family_members').insert({ family_id: familyData.id, user_id: authData.user.id, name, role: 'owner', email, avatar: '👨', color: '#667EEA' })
       showToast('Família criada!')
       onSuccess()
     } else {
       const { data: authData, error: authError } = await supabase.auth.signUp({ email, password })
       if (authError || !authData.user) { showToast(authError?.message || 'Erro', 'error'); setLoading(false); return }
       
-      const { error: joinError } = await supabase.rpc('join_family_with_code', { p_invite_code: inviteCode.toUpperCase(), p_name: name })
-      if (joinError) { showToast(joinError.message, 'error'); setLoading(false); return }
+      const { data: familyData } = await supabase.from('families').select('id').eq('invite_code', inviteCode.toUpperCase()).single()
+      if (!familyData) { showToast('Código inválido', 'error'); setLoading(false); return }
       
+      await supabase.from('family_members').insert({ family_id: familyData.id, user_id: authData.user.id, name, role: 'member', email, avatar: '👤', color: '#4CAF50' })
       showToast('Você entrou na família!')
       onSuccess()
     }
@@ -503,18 +488,14 @@ function AuthScreen({ mode, setMode, onSuccess, showToast }: { mode: 'login' | '
   )
 }
 
-// Task Modal
-function TaskModal({ task, categories, members, currentMember, familyId, isAdmin, onSave, onDelete, onClose }: any) {
+function TaskModal({ task, categories, isAdmin, onSave, onDelete, onClose }: any) {
   const [form, setForm] = useState({
     title: task?.title || '',
     category_id: task?.category_id || categories[0]?.id || '',
-    is_for_everyone: task?.is_for_everyone || false,
+    is_for_everyone: task?.is_for_everyone ?? true,
     due_date: task?.due_date || '',
-    due_time: task?.due_time || '',
     priority: task?.priority || 'medium',
-    recurrence: task?.recurrence || 'none',
-    has_reminder: task?.has_reminder || false,
-    description: task?.description || ''
+    has_reminder: task?.has_reminder || false
   })
 
   return (
@@ -546,34 +527,17 @@ function TaskModal({ task, categories, members, currentMember, familyId, isAdmin
               <span className="text-xl">👨‍👩‍👧‍👦</span>
               <span>Tarefa para toda a família</span>
             </label>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Data</label>
-                <input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Horário</label>
-                <input type="time" value={form.due_time} onChange={(e) => setForm({ ...form, due_time: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none" />
-              </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Data</label>
+              <input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none" />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Prioridade</label>
-                <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none">
-                  <option value="low">🟢 Baixa</option>
-                  <option value="medium">🟡 Média</option>
-                  <option value="high">🔴 Alta</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Repetição</label>
-                <select value={form.recurrence} onChange={(e) => setForm({ ...form, recurrence: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none">
-                  <option value="none">Não repete</option>
-                  <option value="daily">Diário</option>
-                  <option value="weekly">Semanal</option>
-                  <option value="monthly">Mensal</option>
-                </select>
-              </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Prioridade</label>
+              <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none">
+                <option value="low">🟢 Baixa</option>
+                <option value="medium">🟡 Média</option>
+                <option value="high">🔴 Alta</option>
+              </select>
             </div>
             <label className="flex items-center gap-3 p-3 rounded-xl border border-white/20 cursor-pointer">
               <input type="checkbox" checked={form.has_reminder} onChange={(e) => setForm({ ...form, has_reminder: e.target.checked })} className="w-5 h-5 rounded accent-violet-500" />
@@ -591,4 +555,3 @@ function TaskModal({ task, categories, members, currentMember, familyId, isAdmin
     </div>
   )
 }
-
