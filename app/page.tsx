@@ -350,7 +350,7 @@ export default function FamiliaTaskApp() {
           currentMember={currentMember}
           familyId={family.id}
           isAdmin={isAdmin}
-          onSave={async (taskData) => {
+          onSave={async (taskData: any) =>
             if (editingTask) {
               await supabase.from('tasks').update(taskData).eq('id', editingTask.id)
             } else {
