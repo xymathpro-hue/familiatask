@@ -54,6 +54,9 @@ export interface Task {
   due_date: string | null
   due_time: string | null
   recurrence: RecurrenceType
+  recurrence_type: string | null
+  recurrence_days: number[] | null
+  recurrence_day_of_month: number | null
   recurrence_end_date: string | null
   has_reminder: boolean
   reminder_minutes_before: number
@@ -70,6 +73,7 @@ export interface TaskAssignment {
   id: string
   task_id: string
   member_id: string
+  family_id?: string
   assigned_at: string
   completed_at: string | null
 }
