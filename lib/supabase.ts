@@ -5,6 +5,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
+// Tipos TypeScript
 export type MemberRole = 'owner' | 'admin' | 'member' | 'visitor'
 export type TaskStatus = 'pending' | 'in_progress' | 'completed'
 export type TaskPriority = 'low' | 'medium' | 'high'
@@ -54,9 +55,9 @@ export interface Task {
   due_date: string | null
   due_time: string | null
   recurrence: RecurrenceType
-  recurrence_type: string | null
-  recurrence_days: number[] | null
-  recurrence_day_of_month: number | null
+  recurrence_type?: string | null
+  recurrence_days?: number[] | null
+  recurrence_day_of_month?: number | null
   recurrence_end_date: string | null
   has_reminder: boolean
   reminder_minutes_before: number
@@ -76,4 +77,26 @@ export interface TaskAssignment {
   family_id?: string
   assigned_at: string
   completed_at: string | null
+}
+
+// ============================================
+// LISTA DE COMPRAS
+// ============================================
+
+export type ShoppingCategory = 'mercado' | 'farmacia' | 'padaria' | 'acougue' | 'hortifruti' | 'limpeza' | 'higiene' | 'outros'
+
+export interface ShoppingItem {
+  id: string
+  family_id: string
+  name: string
+  quantity: number
+  unit: string | null
+  category: ShoppingCategory
+  is_purchased: boolean
+  purchased_by: string | null
+  purchased_at: string | null
+  added_by: string
+  notes: string | null
+  created_at: string
+  updated_at: string
 }
