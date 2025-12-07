@@ -96,6 +96,7 @@ export default function FamiliaTaskApp() {
   const [taskPriority, setTaskPriority] = useState<'low' | 'medium' | 'high'>('medium')
   const [taskAssignees, setTaskAssignees] = useState<string[]>([])
   const [taskRecurrence, setTaskRecurrence] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none')
+  const [taskTimes, setTaskTimes] = useState<string[]>(['']) // Múltiplos horários
   const [savingTask, setSavingTask] = useState(false)
   
   // Estado do Relatório
@@ -317,6 +318,7 @@ export default function FamiliaTaskApp() {
     setTaskPriority('medium')
     setTaskAssignees([])
     setTaskRecurrence('none')
+    setTaskTimes([''])
   }
 
   const openTaskModal = (task?: Task | null) => {
@@ -329,6 +331,7 @@ export default function FamiliaTaskApp() {
       setTaskDueTime(task.due_time || '')
       setTaskPriority(task.priority)
       setTaskRecurrence((task.recurrence as any) || 'none')
+      setTaskTimes(task.due_time ? [task.due_time] : [''])
       // Carregar assignees
       const taskAssigns = assignments.filter(a => a.task_id === task.id).map(a => a.member_id)
       setTaskAssignees(taskAssigns)
@@ -345,14 +348,52 @@ export default function FamiliaTaskApp() {
     resetTaskForm()
   }
 
+  // Funções para gerenciar múltiplos horários
+  const addTimeSlot = () => {
+    setTaskTimes(prev => [...prev, ''])
+  }
+
+  const removeTimeSlot = (index: number) => {
+    setTaskTimes(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const updateTimeSlot = (index: number, value: string) => {
+    setTaskTimes(prev => prev.map((t, i) => i === index ? value : t))
+  }
+
+  // Gerar datas futuras baseado na recorrência
+  const generateRecurringDates = (startDate: string, recurrence: string, count: number = 30): string[] => {
+    const dates: string[] = [startDate]
+    const start = new Date(startDate + 'T00:00:00')
+    
+    for (let i = 1; i < count; i++) {
+      const newDate = new Date(start)
+      
+      if (recurrence === 'daily') {
+        newDate.setDate(start.getDate() + i)
+      } else if (recurrence === 'weekly') {
+        newDate.setDate(start.getDate() + (i * 7))
+      } else if (recurrence === 'monthly') {
+        newDate.setMonth(start.getMonth() + i)
+      }
+      
+      dates.push(newDate.toISOString().split('T')[0])
+    }
+    
+    return dates
+  }
+
   const handleSaveTask = async () => {
     if (!taskTitle.trim() || !family || !currentMember) return
 
     setSavingTask(true)
 
     try {
+      // Filtrar horários válidos
+      const validTimes = taskTimes.filter(t => t.trim() !== '')
+      
       if (editingTask) {
-        // Atualizar tarefa existente
+        // Atualizar tarefa existente (só atualiza essa, não cria novas)
         await supabase
           .from('tasks')
           .update({
@@ -360,7 +401,7 @@ export default function FamiliaTaskApp() {
             description: taskDescription.trim() || null,
             category_id: taskCategoryId || null,
             due_date: taskDueDate || null,
-            due_time: taskDueTime || null,
+            due_time: validTimes[0] || null,
             priority: taskPriority,
             recurrence: taskRecurrence,
             updated_at: new Date().toISOString()
@@ -381,34 +422,62 @@ export default function FamiliaTaskApp() {
 
         showNotification('success', 'Tarefa atualizada!')
       } else {
-        // Criar nova tarefa
-        const { data: newTask } = await supabase
-          .from('tasks')
-          .insert({
-            family_id: family.id,
-            title: taskTitle.trim(),
-            description: taskDescription.trim() || null,
-            category_id: taskCategoryId || null,
-            due_date: taskDueDate || null,
-            due_time: taskDueTime || null,
-            priority: taskPriority,
-            recurrence: taskRecurrence,
-            status: 'pending',
-            created_by: currentMember.id
-          })
-          .select()
-          .single()
-
-        if (newTask && taskAssignees.length > 0) {
-          const assignmentInserts = taskAssignees.map(memberId => ({
-            task_id: newTask.id,
-            member_id: memberId,
-            family_id: family.id
-          }))
-          await supabase.from('task_assignments').insert(assignmentInserts)
+        // Criar novas tarefas
+        // Gerar datas baseado na recorrência
+        let dates: string[] = []
+        if (taskDueDate) {
+          if (taskRecurrence === 'none') {
+            dates = [taskDueDate]
+          } else {
+            // Gerar próximos 30 dias/semanas/meses
+            dates = generateRecurringDates(taskDueDate, taskRecurrence, 30)
+          }
+        } else {
+          dates = ['']
         }
 
-        showNotification('success', 'Tarefa criada!')
+        // Se não tem horários definidos, usar array com string vazia
+        const timesToUse = validTimes.length > 0 ? validTimes : ['']
+        
+        let totalCreated = 0
+
+        // Criar uma tarefa para cada combinação de data + horário
+        for (const date of dates) {
+          for (const time of timesToUse) {
+            const { data: newTask } = await supabase
+              .from('tasks')
+              .insert({
+                family_id: family.id,
+                title: taskTitle.trim(),
+                description: taskDescription.trim() || null,
+                category_id: taskCategoryId || null,
+                due_date: date || null,
+                due_time: time || null,
+                priority: taskPriority,
+                recurrence: taskRecurrence,
+                status: 'pending',
+                created_by: currentMember.id
+              })
+              .select()
+              .single()
+
+            if (newTask && taskAssignees.length > 0) {
+              const assignmentInserts = taskAssignees.map(memberId => ({
+                task_id: newTask.id,
+                member_id: memberId,
+                family_id: family.id
+              }))
+              await supabase.from('task_assignments').insert(assignmentInserts)
+            }
+            
+            totalCreated++
+          }
+        }
+
+        const msg = totalCreated > 1 
+          ? `${totalCreated} tarefas criadas!` 
+          : 'Tarefa criada!'
+        showNotification('success', msg)
       }
 
       closeTaskModal()
@@ -459,37 +528,49 @@ export default function FamiliaTaskApp() {
   const getTaskStatus = (task: Task) => {
     if (task.status === 'completed') return 'completed'
     if (task.due_date) {
-      const today = new Date()
-      today.setHours(0, 0, 0, 0)
-      const dueDate = new Date(task.due_date)
-      if (dueDate < today) return 'overdue'
+      // Usar comparação de strings para evitar problema de timezone
+      const now = new Date()
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+      const taskDateStr = task.due_date.split('T')[0]
+      if (taskDateStr < todayStr) return 'overdue'
     }
     return task.status
   }
 
   const filteredTasks = useMemo(() => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    // Usar data local sem problemas de timezone
+    const now = new Date()
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
     
-    const endOfWeek = new Date(today)
-    endOfWeek.setDate(today.getDate() + 7)
+    const endOfWeek = new Date(now)
+    endOfWeek.setDate(now.getDate() + 7)
+    const endOfWeekStr = `${endOfWeek.getFullYear()}-${String(endOfWeek.getMonth() + 1).padStart(2, '0')}-${String(endOfWeek.getDate()).padStart(2, '0')}`
 
     return tasks.filter(task => {
+      // Se não tem data, só mostra em "Todas"
       if (!task.due_date) return taskFilter === 'all'
       
-      const dueDate = new Date(task.due_date)
+      // Comparar strings de data diretamente (evita problemas de timezone)
+      const taskDateStr = task.due_date.split('T')[0]
       
       if (taskFilter === 'today') {
-        return dueDate.toDateString() === today.toDateString()
+        return taskDateStr === todayStr
       } else if (taskFilter === 'week') {
-        return dueDate >= today && dueDate <= endOfWeek
+        return taskDateStr >= todayStr && taskDateStr <= endOfWeekStr
       }
       return true
     }).sort((a, b) => {
+      // Primeiro por status (atrasadas primeiro, depois pendentes, depois concluídas)
       const statusOrder = { overdue: 0, pending: 1, in_progress: 2, completed: 3 }
       const statusA = getTaskStatus(a)
       const statusB = getTaskStatus(b)
-      return statusOrder[statusA] - statusOrder[statusB]
+      if (statusOrder[statusA] !== statusOrder[statusB]) {
+        return statusOrder[statusA] - statusOrder[statusB]
+      }
+      // Depois por horário
+      const timeA = a.due_time || '99:99'
+      const timeB = b.due_time || '99:99'
+      return timeA.localeCompare(timeB)
     })
   }, [tasks, taskFilter])
 
@@ -895,26 +976,57 @@ export default function FamiliaTaskApp() {
                 </div>
               </div>
 
-              {/* Data e Hora */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm text-white/60 mb-2">Data</label>
-                  <input
-                    type="date"
-                    value={taskDueDate}
-                    onChange={(e) => setTaskDueDate(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white"
-                  />
+              {/* Data */}
+              <div>
+                <label className="block text-sm text-white/60 mb-2">Data</label>
+                <input
+                  type="date"
+                  value={taskDueDate}
+                  onChange={(e) => setTaskDueDate(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white"
+                />
+              </div>
+
+              {/* Horários (múltiplos) */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm text-white/60">Horários</label>
+                  <button
+                    type="button"
+                    onClick={addTimeSlot}
+                    className="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Adicionar horário
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-sm text-white/60 mb-2">Hora</label>
-                  <input
-                    type="time"
-                    value={taskDueTime}
-                    onChange={(e) => setTaskDueTime(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white"
-                  />
+                <div className="space-y-2">
+                  {taskTimes.map((time, index) => (
+                    <div key={index} className="flex gap-2">
+                      <input
+                        type="time"
+                        value={time}
+                        onChange={(e) => updateTimeSlot(index, e.target.value)}
+                        className="flex-1 px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white"
+                        placeholder="00:00"
+                      />
+                      {taskTimes.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeTimeSlot(index)}
+                          className="px-3 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500/30"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
+                {taskTimes.length > 1 && (
+                  <p className="text-xs text-white/40 mt-2">
+                    💡 Serão criadas {taskTimes.filter(t => t).length} tarefas, uma para cada horário
+                  </p>
+                )}
               </div>
 
               {/* Prioridade */}
@@ -960,6 +1072,11 @@ export default function FamiliaTaskApp() {
                     </button>
                   ))}
                 </div>
+                {taskRecurrence !== 'none' && (
+                  <p className="text-xs text-amber-400/80 mt-2">
+                    ⚡ Serão criadas 30 tarefas {taskRecurrence === 'daily' ? 'para os próximos 30 dias' : taskRecurrence === 'weekly' ? 'para as próximas 30 semanas' : 'para os próximos 30 meses'}
+                  </p>
+                )}
               </div>
 
               {/* Responsáveis */}
