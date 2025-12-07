@@ -5,7 +5,7 @@ import {
   Home, Users, Settings, Plus, Check, Calendar, Star,
   Bell, Trash2, Edit3, Copy, Eye, Clock,
   ShieldCheck, Crown,
-  LogOut, Share2, AlertCircle, CheckCircle, X, Mail, Lock, User, Repeat
+  LogOut, Share2, AlertCircle, CheckCircle, X, Mail, Lock, User, Repeat, Filter
 } from 'lucide-react'
 import { supabase, Family, FamilyMember, Task, Category, TaskAssignment } from '@/lib/supabase'
 
@@ -58,6 +58,59 @@ const getTaskStatus = (task: Task) => {
   return task.status
 }
 
+// Função para verificar se é hoje
+const isToday = (dateStr: string) => {
+  const today = new Date()
+  const date = new Date(dateStr)
+  return today.toDateString() === date.toDateString()
+}
+
+// Função para verificar se é esta semana
+const isThisWeek = (dateStr: string) => {
+  const today = new Date()
+  const date = new Date(dateStr)
+  const startOfWeek = new Date(today)
+  startOfWeek.setDate(today.getDate() - today.getDay())
+  startOfWeek.setHours(0, 0, 0, 0)
+  const endOfWeek = new Date(startOfWeek)
+  endOfWeek.setDate(startOfWeek.getDate() + 6)
+  endOfWeek.setHours(23, 59, 59, 999)
+  return date >= startOfWeek && date <= endOfWeek
+}
+
+// Função para gerar datas das próximas 4 semanas baseado na recorrência
+const generateRecurringDates = (recurrenceType: string, recurrenceDays: number[], recurrenceDayOfMonth: number, startDate: Date): Date[] => {
+  const dates: Date[] = []
+  const endDate = new Date(startDate)
+  endDate.setDate(endDate.getDate() + 28) // 4 semanas
+
+  if (recurrenceType === 'weekly' && recurrenceDays && recurrenceDays.length > 0) {
+    const current = new Date(startDate)
+    while (current <= endDate) {
+      if (recurrenceDays.includes(current.getDay())) {
+        dates.push(new Date(current))
+      }
+      current.setDate(current.getDate() + 1)
+    }
+  } else if (recurrenceType === 'monthly' && recurrenceDayOfMonth) {
+    const current = new Date(startDate)
+    for (let i = 0; i < 2; i++) { // 2 meses
+      const monthDate = new Date(current.getFullYear(), current.getMonth() + i, recurrenceDayOfMonth)
+      if (monthDate >= startDate && monthDate <= endDate) {
+        dates.push(monthDate)
+      }
+    }
+  } else if (recurrenceType === 'yearly') {
+    // Para anual, só adiciona se cair dentro das 4 semanas
+    const yearlyDate = new Date(startDate)
+    if (yearlyDate <= endDate) {
+      dates.push(yearlyDate)
+    }
+  }
+
+  return dates
+}
+
 export default function FamiliaTaskApp() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -70,6 +123,7 @@ export default function FamiliaTaskApp() {
   const [currentMember, setCurrentMember] = useState<FamilyMember | null>(null)
   const [filterMember, setFilterMember] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
+  const [filterPeriod, setFilterPeriod] = useState('today') // hoje, semana, todas
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [showCodeModal, setShowCodeModal] = useState(false)
@@ -119,7 +173,7 @@ export default function FamiliaTaskApp() {
           .from('tasks')
           .select('*, task_assignments(*)')
           .eq('family_id', memberData.family_id)
-          .order('created_at', { ascending: false })
+          .order('due_date', { ascending: true })
         if (tasksData) setTasks(tasksData)
 
         supabase
@@ -171,18 +225,47 @@ export default function FamiliaTaskApp() {
     return <AuthScreen mode={authMode} setMode={setAuthMode} onSuccess={checkUser} showToast={showToast} />
   }
 
+  // Filtrar tarefas
   const filteredTasks = tasks.filter(task => {
+    // Filtro por período
+    if (filterPeriod === 'today' && task.due_date && !isToday(task.due_date)) return false
+    if (filterPeriod === 'week' && task.due_date && !isThisWeek(task.due_date)) return false
+    
+    // Filtro por membro
     if (filterMember !== 'all') {
       const assignments = task.task_assignments?.map((a: TaskAssignment) => a.member_id) || []
       if (filterMember === 'family' && !task.is_for_everyone) return false
       if (filterMember !== 'family' && !assignments.includes(filterMember) && !task.is_for_everyone) return false
     }
+    
+    // Filtro por status
     if (filterStatus !== 'all') {
       const realStatus = getTaskStatus(task)
       if (realStatus !== filterStatus) return false
     }
+    
     return true
   })
+
+  // Ordenar: atrasadas primeiro, depois por data
+  const sortedTasks = [...filteredTasks].sort((a, b) => {
+    const statusA = getTaskStatus(a)
+    const statusB = getTaskStatus(b)
+    
+    // Atrasadas primeiro
+    if (statusA === 'overdue' && statusB !== 'overdue') return -1
+    if (statusB === 'overdue' && statusA !== 'overdue') return 1
+    
+    // Depois por data
+    if (a.due_date && b.due_date) {
+      return new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
+    }
+    return 0
+  })
+
+  // Contadores
+  const todayCount = tasks.filter(t => t.due_date && isToday(t.due_date) && t.status !== 'completed').length
+  const overdueCount = tasks.filter(t => getTaskStatus(t) === 'overdue').length
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
@@ -214,30 +297,67 @@ export default function FamiliaTaskApp() {
       <main className="max-w-lg mx-auto px-4 pb-24">
         {activeTab === 'tasks' && (
           <div className="py-4 space-y-4">
+            {/* Resumo */}
+            <div className="flex gap-3">
+              {overdueCount > 0 && (
+                <div className="flex-1 p-3 rounded-xl bg-red-500/20 border border-red-500/30">
+                  <p className="text-2xl font-bold text-red-400">{overdueCount}</p>
+                  <p className="text-xs text-red-300">Atrasadas</p>
+                </div>
+              )}
+              <div className="flex-1 p-3 rounded-xl bg-violet-500/20 border border-violet-500/30">
+                <p className="text-2xl font-bold text-violet-400">{todayCount}</p>
+                <p className="text-xs text-violet-300">Para hoje</p>
+              </div>
+            </div>
+
+            {/* Filtro por período */}
+            <div className="flex gap-1 p-1 bg-white/5 rounded-xl">
+              <button 
+                onClick={() => setFilterPeriod('today')} 
+                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${filterPeriod === 'today' ? 'bg-violet-500 text-white' : 'text-white/60'}`}
+              >
+                Hoje
+              </button>
+              <button 
+                onClick={() => setFilterPeriod('week')} 
+                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${filterPeriod === 'week' ? 'bg-violet-500 text-white' : 'text-white/60'}`}
+              >
+                Semana
+              </button>
+              <button 
+                onClick={() => setFilterPeriod('all')} 
+                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${filterPeriod === 'all' ? 'bg-violet-500 text-white' : 'text-white/60'}`}
+              >
+                Todas
+              </button>
+            </div>
+
+            {/* Outros filtros */}
             <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
               <select value={filterMember} onChange={(e) => setFilterMember(e.target.value)} className="px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-sm">
-                <option value="all">Todos</option>
+                <option value="all">👥 Todos</option>
                 <option value="family">👨‍👩‍👧‍👦 Família</option>
                 {members.map(m => <option key={m.id} value={m.id}>{m.avatar} {m.name}</option>)}
               </select>
               <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-sm">
-                <option value="all">Todos Status</option>
+                <option value="all">📋 Todos</option>
                 <option value="pending">⏳ Pendente</option>
-                <option value="in_progress">🔄 Em Andamento</option>
                 <option value="overdue">🔴 Atrasada</option>
                 <option value="completed">✅ Concluída</option>
               </select>
             </div>
 
+            {/* Lista de tarefas */}
             <div className="space-y-3">
-              {filteredTasks.length === 0 ? (
+              {sortedTasks.length === 0 ? (
                 <div className="text-center py-12 text-white/60">
                   <CheckCircle className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                  <p>Nenhuma tarefa encontrada</p>
+                  <p>{filterPeriod === 'today' ? 'Nenhuma tarefa para hoje!' : 'Nenhuma tarefa encontrada'}</p>
                   <p className="text-sm mt-2">Toque no + para criar</p>
                 </div>
               ) : (
-                filteredTasks.map(task => {
+                sortedTasks.map(task => {
                   const category = categories.find(c => c.id === task.category_id)
                   const assignments = task.task_assignments?.map((a: TaskAssignment) => a.member_id) || []
                   const assignedMembers = members.filter(m => assignments.includes(m.id))
@@ -249,7 +369,7 @@ export default function FamiliaTaskApp() {
                   return (
                     <div key={task.id} className={`p-4 rounded-2xl bg-white/5 border transition-all ${
                       realStatus === 'completed' ? 'border-green-500/30 opacity-70' : 
-                      realStatus === 'overdue' ? 'border-red-500/50' : 'border-white/10'
+                      realStatus === 'overdue' ? 'border-red-500/50 bg-red-500/5' : 'border-white/10'
                     }`}>
                       <div className="flex items-start gap-3">
                         <button
@@ -262,12 +382,15 @@ export default function FamiliaTaskApp() {
                               completed_at: newStatus === 'completed' ? new Date().toISOString() : null 
                             }).eq('id', task.id)
                             if (user) loadFamilyData(user.id)
+                            if (newStatus === 'completed') {
+                              showToast('Tarefa concluída! ✅', 'success')
+                            }
                           }}
                           disabled={!canComplete}
-                          className={`mt-1 w-6 h-6 rounded-full border-2 flex items-center justify-center ${
+                          className={`mt-1 w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all ${
                             realStatus === 'completed' ? 'bg-green-500 border-green-500' : 
                             realStatus === 'overdue' ? 'border-red-500 hover:bg-red-500/20' :
-                            canComplete ? 'border-white/30 hover:border-violet-500' : 'border-white/20 opacity-50'
+                            canComplete ? 'border-white/30 hover:border-violet-500 hover:bg-violet-500/20' : 'border-white/20 opacity-50'
                           }`}
                         >
                           {realStatus === 'completed' && <Check className="w-4 h-4 text-white" />}
@@ -281,9 +404,9 @@ export default function FamiliaTaskApp() {
                           </div>
                           <div className="flex flex-wrap items-center gap-2 text-xs text-white/60">
                             {task.due_date && (
-                              <span className={`flex items-center gap-1 ${realStatus === 'overdue' ? 'text-red-400' : ''}`}>
+                              <span className={`flex items-center gap-1 ${realStatus === 'overdue' ? 'text-red-400 font-medium' : ''}`}>
                                 <Calendar className="w-3 h-3" />
-                                {new Date(task.due_date).toLocaleDateString('pt-BR')}
+                                {isToday(task.due_date) ? 'Hoje' : new Date(task.due_date).toLocaleDateString('pt-BR')}
                               </span>
                             )}
                             {task.due_time && (
@@ -292,34 +415,31 @@ export default function FamiliaTaskApp() {
                                 {task.due_time.substring(0, 5)}
                               </span>
                             )}
-                            {task.has_reminder && <span className="flex items-center gap-1 text-amber-400"><Bell className="w-3 h-3" />Lembrete</span>}
                           </div>
                           <div className="flex items-center gap-2 mt-2 flex-wrap">
                             {task.is_for_everyone ? (
-                              <span className="px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 text-xs">👨‍👩‍👧‍👦 Toda Família</span>
+                              <span className="px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 text-xs">👨‍👩‍👧‍👦 Família</span>
                             ) : assignedMembers.length > 0 ? (
                               <div className="flex items-center gap-1">
-                                <div className="flex -space-x-2">
-                                  {assignedMembers.slice(0, 3).map(m => (
-                                    <div key={m.id} className="w-6 h-6 rounded-full flex items-center justify-center text-xs border-2 border-slate-900" style={{ backgroundColor: m.color }}>{m.avatar}</div>
-                                  ))}
-                                </div>
+                                {assignedMembers.slice(0, 3).map(m => (
+                                  <span key={m.id} className="text-sm">{m.avatar}</span>
+                                ))}
                                 {assignedMembers.length > 3 && <span className="text-xs text-white/60">+{assignedMembers.length - 3}</span>}
                               </div>
                             ) : null}
-                            <span className="px-2 py-0.5 rounded-full text-xs" style={{ backgroundColor: statusConfig.bg, color: statusConfig.color }}>
+                            <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: statusConfig.bg, color: statusConfig.color }}>
                               {statusConfig.label}
                             </span>
                           </div>
                           {realStatus === 'completed' && completedByMember && (
                             <div className="flex items-center gap-1 mt-2 text-xs text-green-400">
                               <Check className="w-3 h-3" />
-                              <span>Concluída por {completedByMember.avatar} {completedByMember.name}</span>
+                              <span>Por {completedByMember.avatar} {completedByMember.name}</span>
                             </div>
                           )}
                         </div>
                         <button onClick={() => { setEditingTask(task); setShowTaskModal(true) }} className="p-2 rounded-lg hover:bg-white/10">
-                          <Edit3 className="w-4 h-4 text-white/60" />
+                          <Edit3 className="w-5 h-5 text-white/60" />
                         </button>
                       </div>
                     </div>
@@ -349,6 +469,12 @@ export default function FamiliaTaskApp() {
               <div className="space-y-3">
                 {members.map(member => {
                   const roleConfig = MEMBER_ROLES[member.role as keyof typeof MEMBER_ROLES]
+                  // Contar tarefas concluídas do membro este mês
+                  const memberCompletedTasks = tasks.filter(t => 
+                    t.completed_by === member.id && 
+                    t.status === 'completed'
+                  ).length
+                  
                   return (
                     <div key={member.id} className={`p-4 rounded-2xl bg-white/5 border ${member.is_temporary ? 'border-dashed border-amber-500/50' : 'border-white/10'}`}>
                       <div className="flex items-center gap-3">
@@ -358,9 +484,11 @@ export default function FamiliaTaskApp() {
                             <span className="font-medium">{member.name}</span>
                             {member.user_id === user?.id && <span className="px-2 py-0.5 rounded text-xs bg-white/20">Você</span>}
                           </div>
-                          <div className="flex items-center gap-1 text-sm text-white/60">
+                          <div className="flex items-center gap-2 text-sm text-white/60">
                             {React.createElement(roleConfig.icon, { className: 'w-4 h-4', style: { color: roleConfig.color } })}
                             <span>{roleConfig.label}</span>
+                            <span className="text-white/40">•</span>
+                            <span className="text-green-400">{memberCompletedTasks} concluídas</span>
                           </div>
                         </div>
                       </div>
@@ -390,9 +518,17 @@ export default function FamiliaTaskApp() {
 
       <nav className="fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur-xl border-t border-white/10 safe-area-pb">
         <div className="max-w-lg mx-auto flex">
-          {[{ id: 'tasks', icon: Check, label: 'Tarefas' }, { id: 'family', icon: Users, label: 'Família' }, { id: 'settings', icon: Settings, label: 'Config' }].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 flex flex-col items-center py-3 ${activeTab === tab.id ? 'text-violet-400' : 'text-white/60'}`}>
-              <tab.icon className="w-6 h-6 mb-1" /><span className="text-xs">{tab.label}</span>
+          {[
+            { id: 'tasks', icon: Check, label: 'Tarefas', badge: overdueCount > 0 ? overdueCount : null },
+            { id: 'family', icon: Users, label: 'Família' },
+            { id: 'settings', icon: Settings, label: 'Config' }
+          ].map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 flex flex-col items-center py-3 relative ${activeTab === tab.id ? 'text-violet-400' : 'text-white/60'}`}>
+              <tab.icon className="w-6 h-6 mb-1" />
+              <span className="text-xs">{tab.label}</span>
+              {tab.badge && (
+                <span className="absolute top-2 right-1/4 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center font-bold">{tab.badge}</span>
+              )}
             </button>
           ))}
         </div>
@@ -410,42 +546,68 @@ export default function FamiliaTaskApp() {
           categories={categories}
           members={members}
           familyId={family.id}
+          currentMemberId={currentMember?.id}
           isAdmin={isAdmin}
-          onSave={async (taskData: any, selectedMembers: string[]) => {
-            const { assignedMembers, ...taskFields } = taskData
-            
-            if (editingTask) {
-              await supabase.from('tasks').update(taskFields).eq('id', editingTask.id)
-              // Atualizar atribuições
-              await supabase.from('task_assignments').delete().eq('task_id', editingTask.id)
-              if (!taskFields.is_for_everyone && selectedMembers.length > 0) {
-                const assignments = selectedMembers.map(memberId => ({
-                  task_id: editingTask.id,
-                  member_id: memberId,
-                  family_id: family.id
-                }))
-                await supabase.from('task_assignments').insert(assignments)
+          onSave={async (taskData: any, selectedMembers: string[], isRecurring: boolean, recurringDates: Date[]) => {
+            try {
+              if (editingTask) {
+                // Atualizar tarefa existente
+                await supabase.from('tasks').update(taskData).eq('id', editingTask.id)
+                await supabase.from('task_assignments').delete().eq('task_id', editingTask.id)
+                if (!taskData.is_for_everyone && selectedMembers.length > 0) {
+                  const assignments = selectedMembers.map(memberId => ({
+                    task_id: editingTask.id,
+                    member_id: memberId,
+                    family_id: family.id
+                  }))
+                  await supabase.from('task_assignments').insert(assignments)
+                }
+                showToast('Tarefa atualizada!', 'success')
+              } else if (isRecurring && recurringDates.length > 0) {
+                // Criar múltiplas tarefas para recorrência
+                for (const date of recurringDates) {
+                  const { data: newTask } = await supabase.from('tasks').insert({ 
+                    ...taskData, 
+                    due_date: date.toISOString().split('T')[0],
+                    family_id: family.id, 
+                    created_by: currentMember?.id 
+                  }).select().single()
+                  
+                  if (newTask && !taskData.is_for_everyone && selectedMembers.length > 0) {
+                    const assignments = selectedMembers.map(memberId => ({
+                      task_id: newTask.id,
+                      member_id: memberId,
+                      family_id: family.id
+                    }))
+                    await supabase.from('task_assignments').insert(assignments)
+                  }
+                }
+                showToast(`${recurringDates.length} tarefas criadas!`, 'success')
+              } else {
+                // Criar tarefa única
+                const { data: newTask } = await supabase.from('tasks').insert({ 
+                  ...taskData, 
+                  family_id: family.id, 
+                  created_by: currentMember?.id 
+                }).select().single()
+                
+                if (newTask && !taskData.is_for_everyone && selectedMembers.length > 0) {
+                  const assignments = selectedMembers.map(memberId => ({
+                    task_id: newTask.id,
+                    member_id: memberId,
+                    family_id: family.id
+                  }))
+                  await supabase.from('task_assignments').insert(assignments)
+                }
+                showToast('Tarefa criada!', 'success')
               }
-            } else {
-              const { data: newTask } = await supabase.from('tasks').insert({ 
-                ...taskFields, 
-                family_id: family.id, 
-                created_by: currentMember?.id 
-              }).select().single()
               
-              if (newTask && !taskFields.is_for_everyone && selectedMembers.length > 0) {
-                const assignments = selectedMembers.map(memberId => ({
-                  task_id: newTask.id,
-                  member_id: memberId,
-                  family_id: family.id
-                }))
-                await supabase.from('task_assignments').insert(assignments)
-              }
+              setShowTaskModal(false)
+              setEditingTask(null)
+              if (user) loadFamilyData(user.id)
+            } catch (error: any) {
+              showToast('Erro: ' + error.message, 'error')
             }
-            setShowTaskModal(false)
-            setEditingTask(null)
-            if (user) loadFamilyData(user.id)
-            showToast(editingTask ? 'Tarefa atualizada!' : 'Tarefa criada!', 'success')
           }}
           onDelete={editingTask && isAdmin ? async () => {
             await supabase.from('task_assignments').delete().eq('task_id', editingTask.id)
@@ -514,10 +676,8 @@ function AuthScreen({ mode, setMode, onSuccess, showToast }: { mode: 'login' | '
           onSuccess()
         }
       } else if (mode === 'register') {
-        // Verificar se tem código de convite
         const hasInviteCode = inviteCode.trim().length > 0
 
-        // 1. Criar usuário
         const { data: authData, error: authError } = await supabase.auth.signUp({ email, password })
         if (authError || !authData.user) {
           showToast(authError?.message || 'Erro ao criar conta', 'error')
@@ -526,7 +686,6 @@ function AuthScreen({ mode, setMode, onSuccess, showToast }: { mode: 'login' | '
         }
 
         if (hasInviteCode) {
-          // ENTRAR EM FAMÍLIA EXISTENTE
           const { data: familyData, error: familyError } = await supabase
             .from('families')
             .select('id')
@@ -559,7 +718,6 @@ function AuthScreen({ mode, setMode, onSuccess, showToast }: { mode: 'login' | '
 
           showToast('Você entrou na família!', 'success')
         } else {
-          // CRIAR NOVA FAMÍLIA
           if (!familyName.trim()) {
             showToast('Digite o nome da família', 'error')
             setLoading(false)
@@ -601,7 +759,6 @@ function AuthScreen({ mode, setMode, onSuccess, showToast }: { mode: 'login' | '
             return
           }
 
-          // Criar categorias padrão
           const defaultCategories = [
             { family_id: familyData.id, name: 'Casa', icon: '🏠', color: '#4CAF50', is_default: true },
             { family_id: familyData.id, name: 'Trabalho', icon: '💼', color: '#2196F3', is_default: true },
@@ -702,15 +859,15 @@ function AuthScreen({ mode, setMode, onSuccess, showToast }: { mode: 'login' | '
   )
 }
 
-// ==================== TASK MODAL (ATUALIZADO) ====================
-function TaskModal({ task, categories, members, isAdmin, onSave, onDelete, onClose }: any) {
+// ==================== TASK MODAL (ATUALIZADO COM AGENDA) ====================
+function TaskModal({ task, categories, members, isAdmin, currentMemberId, onSave, onDelete, onClose }: any) {
   const existingAssignments = task?.task_assignments?.map((a: any) => a.member_id) || []
   
   const [form, setForm] = useState({
     title: task?.title || '',
     category_id: task?.category_id || categories[0]?.id || '',
     is_for_everyone: task?.is_for_everyone ?? true,
-    due_date: task?.due_date || '',
+    due_date: task?.due_date || new Date().toISOString().split('T')[0],
     due_time: task?.due_time?.substring(0, 5) || '',
     priority: task?.priority || 'medium',
     has_reminder: task?.has_reminder || false,
@@ -721,6 +878,45 @@ function TaskModal({ task, categories, members, isAdmin, onSave, onDelete, onClo
   })
   
   const [selectedMembers, setSelectedMembers] = useState<string[]>(existingAssignments)
+  const [previewDates, setPreviewDates] = useState<Date[]>([])
+
+  // Atualizar preview quando muda recorrência
+  useEffect(() => {
+    if (form.recurrence_type && form.recurrence_type !== '') {
+      const startDate = new Date(form.due_date || new Date())
+      const dates = generateRecurringDatesPreview(form.recurrence_type, form.recurrence_days, form.recurrence_day_of_month, startDate)
+      setPreviewDates(dates)
+    } else {
+      setPreviewDates([])
+    }
+  }, [form.recurrence_type, form.recurrence_days, form.recurrence_day_of_month, form.due_date])
+
+  const generateRecurringDatesPreview = (recurrenceType: string, recurrenceDays: number[], recurrenceDayOfMonth: number, startDate: Date): Date[] => {
+    const dates: Date[] = []
+    const endDate = new Date(startDate)
+    endDate.setDate(endDate.getDate() + 28)
+
+    if (recurrenceType === 'weekly' && recurrenceDays && recurrenceDays.length > 0) {
+      const current = new Date(startDate)
+      while (current <= endDate) {
+        if (recurrenceDays.includes(current.getDay())) {
+          dates.push(new Date(current))
+        }
+        current.setDate(current.getDate() + 1)
+      }
+    } else if (recurrenceType === 'monthly' && recurrenceDayOfMonth) {
+      for (let i = 0; i < 2; i++) {
+        const monthDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, recurrenceDayOfMonth)
+        if (monthDate >= startDate && monthDate <= endDate) {
+          dates.push(monthDate)
+        }
+      }
+    } else if (recurrenceType === 'yearly') {
+      dates.push(new Date(startDate))
+    }
+
+    return dates
+  }
 
   const toggleDay = (day: number) => {
     if (form.recurrence_days.includes(day)) {
@@ -741,15 +937,23 @@ function TaskModal({ task, categories, members, isAdmin, onSave, onDelete, onClo
   const handleSubmit = () => {
     if (!form.title.trim()) return
     
+    const isRecurring = form.recurrence_type && form.recurrence_type !== '' && !task
+    
     const taskData = {
-      ...form,
+      title: form.title,
+      category_id: form.category_id,
+      is_for_everyone: form.is_for_everyone,
+      due_date: form.due_date || null,
       due_time: form.due_time || null,
+      priority: form.priority,
+      has_reminder: form.has_reminder,
+      status: form.status,
       recurrence_type: form.recurrence_type || null,
       recurrence_days: form.recurrence_type === 'weekly' ? form.recurrence_days : null,
       recurrence_day_of_month: form.recurrence_type === 'monthly' ? form.recurrence_day_of_month : null
     }
     
-    onSave(taskData, selectedMembers)
+    onSave(taskData, selectedMembers, isRecurring, previewDates)
   }
 
   return (
@@ -833,45 +1037,72 @@ function TaskModal({ task, categories, members, isAdmin, onSave, onDelete, onClo
               </div>
             </div>
 
-            {/* Recorrência */}
-            <div>
-              <label className="block text-sm font-medium mb-2">Repetir</label>
-              <select value={form.recurrence_type} onChange={(e) => setForm({ ...form, recurrence_type: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none">
-                <option value="">Não repetir</option>
-                <option value="weekly">Semanal</option>
-                <option value="monthly">Mensal</option>
-                <option value="yearly">Anual</option>
-              </select>
+            {/* Recorrência (só para novas tarefas) */}
+            {!task && (
+              <div>
+                <label className="block text-sm font-medium mb-2">Repetir</label>
+                <select value={form.recurrence_type} onChange={(e) => setForm({ ...form, recurrence_type: e.target.value, recurrence_days: [] })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none">
+                  <option value="">Não repetir</option>
+                  <option value="weekly">Semanal</option>
+                  <option value="monthly">Mensal</option>
+                  <option value="yearly">Anual</option>
+                </select>
 
-              {form.recurrence_type === 'weekly' && (
-                <div className="flex gap-1 mt-3">
-                  {WEEKDAYS.map(day => (
-                    <button
-                      key={day.value}
-                      type="button"
-                      onClick={() => toggleDay(day.value)}
-                      className={`flex-1 py-2 rounded-lg text-sm font-medium ${form.recurrence_days.includes(day.value) ? 'bg-violet-500 text-white' : 'bg-white/10 text-white/60'}`}
-                    >
-                      {day.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+                {form.recurrence_type === 'weekly' && (
+                  <div className="mt-3">
+                    <p className="text-xs text-white/60 mb-2">Selecione os dias:</p>
+                    <div className="flex gap-1">
+                      {WEEKDAYS.map(day => (
+                        <button
+                          key={day.value}
+                          type="button"
+                          onClick={() => toggleDay(day.value)}
+                          className={`flex-1 py-2 rounded-lg text-sm font-medium ${form.recurrence_days.includes(day.value) ? 'bg-violet-500 text-white' : 'bg-white/10 text-white/60'}`}
+                        >
+                          {day.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-              {form.recurrence_type === 'monthly' && (
-                <div className="mt-3">
-                  <label className="block text-sm text-white/60 mb-1">Dia do mês</label>
-                  <input 
-                    type="number" 
-                    min="1" 
-                    max="31" 
-                    value={form.recurrence_day_of_month} 
-                    onChange={(e) => setForm({ ...form, recurrence_day_of_month: parseInt(e.target.value) })} 
-                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none"
-                  />
-                </div>
-              )}
-            </div>
+                {form.recurrence_type === 'monthly' && (
+                  <div className="mt-3">
+                    <label className="block text-sm text-white/60 mb-1">Dia do mês</label>
+                    <input 
+                      type="number" 
+                      min="1" 
+                      max="31" 
+                      value={form.recurrence_day_of_month} 
+                      onChange={(e) => setForm({ ...form, recurrence_day_of_month: parseInt(e.target.value) })} 
+                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none"
+                    />
+                  </div>
+                )}
+
+                {/* Preview das datas */}
+                {previewDates.length > 0 && (
+                  <div className="mt-3 p-3 rounded-xl bg-violet-500/10 border border-violet-500/30">
+                    <p className="text-xs text-violet-300 mb-2 flex items-center gap-1">
+                      <Calendar className="w-3 h-3" />
+                      Serão criadas {previewDates.length} tarefas:
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {previewDates.slice(0, 8).map((date, i) => (
+                        <span key={i} className="px-2 py-1 rounded bg-violet-500/20 text-xs">
+                          {date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                        </span>
+                      ))}
+                      {previewDates.length > 8 && (
+                        <span className="px-2 py-1 rounded bg-violet-500/20 text-xs">
+                          +{previewDates.length - 8} mais
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Prioridade */}
             <div>
@@ -895,7 +1126,9 @@ function TaskModal({ task, categories, members, isAdmin, onSave, onDelete, onClo
           <div className="flex gap-3 mt-6">
             {onDelete && <button type="button" onClick={onDelete} className="px-4 py-3 rounded-xl bg-red-500/20 text-red-400"><Trash2 className="w-5 h-5" /></button>}
             <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl bg-white/10 font-medium">Cancelar</button>
-            <button type="button" onClick={handleSubmit} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 font-medium">Salvar</button>
+            <button type="button" onClick={handleSubmit} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 font-medium">
+              {previewDates.length > 1 ? `Criar ${previewDates.length} Tarefas` : 'Salvar'}
+            </button>
           </div>
         </div>
       </div>
