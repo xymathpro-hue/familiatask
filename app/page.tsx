@@ -1,4 +1,4 @@
- 'use client'
+'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { 
@@ -277,7 +277,7 @@ export default function FamiliaTaskApp() {
 
     return tasks.filter(task => {
       if (taskFilter === 'all') return true
-      if (!task.due_date) return taskFilter === 'all'
+      if (!task.due_date) return false
       
       const taskDate = new Date(task.due_date)
       
