@@ -1,13 +1,18 @@
-'use client'
+ 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { 
   Home, Users, Settings, Plus, Check, Calendar, Star,
   Bell, Trash2, Edit3, Copy, Eye, Clock,
-  ShieldCheck, Crown,
-  LogOut, Share2, AlertCircle, CheckCircle, X, Mail, Lock, User, Repeat, Filter
+  ShieldCheck, Crown, BarChart3, Download, ChevronLeft, ChevronRight,
+  LogOut, Share2, AlertCircle, CheckCircle, X, Mail, Lock, User, Repeat, Filter,
+  FileText, TrendingUp, Award, Target, Percent, ArrowUp, ArrowDown
 } from 'lucide-react'
 import { supabase, Family, FamilyMember, Task, Category, TaskAssignment } from '@/lib/supabase'
+
+// ============================================
+// CONFIGURAÇÕES
+// ============================================
 
 const MEMBER_ROLES = {
   owner: { label: 'Dono', icon: Crown, color: '#FFD700' },
@@ -23,1214 +28,1212 @@ const STATUS_CONFIG = {
   overdue: { label: 'Atrasada', color: '#F44336', bg: '#FFEBEE' }
 }
 
-const WEEKDAYS = [
-  { value: 0, label: 'Dom', short: 'D' },
-  { value: 1, label: 'Seg', short: 'S' },
-  { value: 2, label: 'Ter', short: 'T' },
-  { value: 3, label: 'Qua', short: 'Q' },
-  { value: 4, label: 'Qui', short: 'Q' },
-  { value: 5, label: 'Sex', short: 'S' },
-  { value: 6, label: 'Sáb', short: 'S' }
+const PRIORITY_CONFIG = {
+  low: { label: 'Baixa', color: '#9E9E9E' },
+  medium: { label: 'Média', color: '#FFC107' },
+  high: { label: 'Alta', color: '#F44336' }
+}
+
+const CATEGORY_ICONS: Record<string, string> = {
+  'Casa': '🏠',
+  'Trabalho': '💼',
+  'Escola': '📚',
+  'Saúde': '💊',
+  'Família': '👨‍👩‍👧‍👦',
+  'Lazer': '🎮',
+  'Compras': '🛒',
+  'Finanças': '💰',
+  'Outros': '📋'
+}
+
+const AVATAR_OPTIONS = ['👨', '👩', '👦', '👧', '👴', '👵', '🧑', '👶', '🐕', '🐈', '🦊', '🦁']
+const COLOR_OPTIONS = ['#667EEA', '#F093FB', '#4ECDC4', '#FF6B6B', '#FFE66D', '#95E1D3', '#A8E6CF', '#DDA0DD']
+
+const MONTHS = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ]
 
-// Função para verificar se tarefa está atrasada
-const isTaskOverdue = (task: Task) => {
-  if (task.status === 'completed') return false
-  if (!task.due_date) return false
-  
-  const now = new Date()
-  const dueDate = new Date(task.due_date)
-  
-  if (task.due_time) {
-    const [hours, minutes] = task.due_time.split(':')
-    dueDate.setHours(parseInt(hours), parseInt(minutes))
-  } else {
-    dueDate.setHours(23, 59, 59)
-  }
-  
-  return now > dueDate
-}
-
-// Função para obter status real (incluindo atrasada)
-const getTaskStatus = (task: Task) => {
-  if (task.status === 'completed') return 'completed'
-  if (isTaskOverdue(task)) return 'overdue'
-  return task.status
-}
-
-// Função para verificar se é hoje
-const isToday = (dateStr: string) => {
-  const today = new Date()
-  const date = new Date(dateStr)
-  return today.toDateString() === date.toDateString()
-}
-
-// Função para verificar se é esta semana
-const isThisWeek = (dateStr: string) => {
-  const today = new Date()
-  const date = new Date(dateStr)
-  const startOfWeek = new Date(today)
-  startOfWeek.setDate(today.getDate() - today.getDay())
-  startOfWeek.setHours(0, 0, 0, 0)
-  const endOfWeek = new Date(startOfWeek)
-  endOfWeek.setDate(startOfWeek.getDate() + 6)
-  endOfWeek.setHours(23, 59, 59, 999)
-  return date >= startOfWeek && date <= endOfWeek
-}
-
-// Função para gerar datas das próximas 4 semanas baseado na recorrência
-const generateRecurringDates = (recurrenceType: string, recurrenceDays: number[], recurrenceDayOfMonth: number, startDate: Date): Date[] => {
-  const dates: Date[] = []
-  const endDate = new Date(startDate)
-  endDate.setDate(endDate.getDate() + 28) // 4 semanas
-
-  if (recurrenceType === 'weekly' && recurrenceDays && recurrenceDays.length > 0) {
-    const current = new Date(startDate)
-    while (current <= endDate) {
-      if (recurrenceDays.includes(current.getDay())) {
-        dates.push(new Date(current))
-      }
-      current.setDate(current.getDate() + 1)
-    }
-  } else if (recurrenceType === 'monthly' && recurrenceDayOfMonth) {
-    const current = new Date(startDate)
-    for (let i = 0; i < 2; i++) { // 2 meses
-      const monthDate = new Date(current.getFullYear(), current.getMonth() + i, recurrenceDayOfMonth)
-      if (monthDate >= startDate && monthDate <= endDate) {
-        dates.push(monthDate)
-      }
-    }
-  } else if (recurrenceType === 'yearly') {
-    // Para anual, só adiciona se cair dentro das 4 semanas
-    const yearlyDate = new Date(startDate)
-    if (yearlyDate <= endDate) {
-      dates.push(yearlyDate)
-    }
-  }
-
-  return dates
-}
+// ============================================
+// COMPONENTE PRINCIPAL
+// ============================================
 
 export default function FamiliaTaskApp() {
+  // Estados de autenticação
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
-  const [activeTab, setActiveTab] = useState('tasks')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [authError, setAuthError] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
+
+  // Estados principais
   const [family, setFamily] = useState<Family | null>(null)
   const [members, setMembers] = useState<FamilyMember[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [assignments, setAssignments] = useState<TaskAssignment[]>([])
   const [currentMember, setCurrentMember] = useState<FamilyMember | null>(null)
-  const [filterMember, setFilterMember] = useState('all')
-  const [filterStatus, setFilterStatus] = useState('all')
-  const [filterPeriod, setFilterPeriod] = useState('today') // hoje, semana, todas
+
+  // Estados de UI
+  const [activeTab, setActiveTab] = useState('tasks')
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
-  const [showCodeModal, setShowCodeModal] = useState(false)
-  const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null)
+  const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null)
+  const [taskFilter, setTaskFilter] = useState<'all' | 'today' | 'week'>('today')
+  
+  // Estado do Relatório
+  const [reportMonth, setReportMonth] = useState(new Date().getMonth())
+  const [reportYear, setReportYear] = useState(new Date().getFullYear())
+
+  // ============================================
+  // AUTENTICAÇÃO
+  // ============================================
 
   useEffect(() => {
-    checkUser()
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null)
+      setLoading(false)
+    })
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null)
-      if (session?.user) loadFamilyData(session.user.id)
     })
+
     return () => subscription.unsubscribe()
   }, [])
 
-  const checkUser = async () => {
-    const { data: { session } } = await supabase.auth.getSession()
-    setUser(session?.user ?? null)
-    if (session?.user) await loadFamilyData(session.user.id)
-    setLoading(false)
-  }
+  useEffect(() => {
+    if (user) {
+      loadUserData()
+    }
+  }, [user])
 
-  const loadFamilyData = async (userId: string) => {
+  const loadUserData = async () => {
+    if (!user) return
+
     try {
+      // Buscar membro atual
       const { data: memberData } = await supabase
         .from('family_members')
         .select('*, families(*)')
-        .eq('user_id', userId)
+        .eq('user_id', user.id)
         .single()
 
       if (memberData) {
         setCurrentMember(memberData)
         setFamily(memberData.families)
-        
+
+        // Buscar outros membros
         const { data: membersData } = await supabase
           .from('family_members')
           .select('*')
           .eq('family_id', memberData.family_id)
-        if (membersData) setMembers(membersData)
+          .order('role', { ascending: true })
 
+        setMembers(membersData || [])
+
+        // Buscar tarefas
+        const { data: tasksData } = await supabase
+          .from('tasks')
+          .select('*')
+          .eq('family_id', memberData.family_id)
+          .order('due_date', { ascending: true })
+
+        setTasks(tasksData || [])
+
+        // Buscar categorias
         const { data: categoriesData } = await supabase
           .from('categories')
           .select('*')
           .eq('family_id', memberData.family_id)
-        if (categoriesData) setCategories(categoriesData)
 
-        const { data: tasksData } = await supabase
-          .from('tasks')
-          .select('*, task_assignments(*)')
-          .eq('family_id', memberData.family_id)
-          .order('due_date', { ascending: true })
-        if (tasksData) setTasks(tasksData)
+        setCategories(categoriesData || [])
 
-        supabase
-          .channel('family-changes')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `family_id=eq.${memberData.family_id}` }, () => loadFamilyData(userId))
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'family_members', filter: `family_id=eq.${memberData.family_id}` }, () => loadFamilyData(userId))
-          .subscribe()
+        // Buscar atribuições
+        const { data: assignmentsData } = await supabase
+          .from('task_assignments')
+          .select('*')
+
+        setAssignments(assignmentsData || [])
+
+        // Realtime
+        setupRealtimeSubscriptions(memberData.family_id)
       }
     } catch (error) {
       console.error('Erro ao carregar dados:', error)
     }
   }
 
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type })
-    setTimeout(() => setToast(null), 3000)
+  const setupRealtimeSubscriptions = (familyId: string) => {
+    supabase
+      .channel('family-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `family_id=eq.${familyId}` }, () => loadUserData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'family_members', filter: `family_id=eq.${familyId}` }, () => loadUserData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_assignments' }, () => loadUserData())
+      .subscribe()
   }
 
-  const isAdmin = ['owner', 'admin'].includes(currentMember?.role || '')
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAuthError('')
 
-  const copyInviteCode = async () => {
-    if (family?.invite_code) {
-      await navigator.clipboard.writeText(family.invite_code)
-      showToast('Código copiado!', 'success')
+    try {
+      if (authMode === 'login') {
+        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        if (error) throw error
+      } else {
+        const { data: authData, error: signUpError } = await supabase.auth.signUp({ email, password })
+        if (signUpError) throw signUpError
+
+        if (authData.user) {
+          if (inviteCode) {
+            // Entrar em família existente
+            const { data: familyData } = await supabase
+              .from('families')
+              .select('*')
+              .eq('invite_code', inviteCode.toUpperCase())
+              .single()
+
+            if (familyData) {
+              await supabase.from('family_members').insert({
+                family_id: familyData.id,
+                user_id: authData.user.id,
+                name: email.split('@')[0],
+                role: 'member',
+                avatar: '🧑',
+                color: COLOR_OPTIONS[Math.floor(Math.random() * COLOR_OPTIONS.length)]
+              })
+            } else {
+              setAuthError('Código de convite inválido')
+              return
+            }
+          } else {
+            // Criar nova família
+            const newCode = Math.random().toString(36).substring(2, 8).toUpperCase()
+            const { data: newFamily } = await supabase
+              .from('families')
+              .insert({ name: 'Minha Família', invite_code: newCode })
+              .select()
+              .single()
+
+            if (newFamily) {
+              await supabase.from('family_members').insert({
+                family_id: newFamily.id,
+                user_id: authData.user.id,
+                name: email.split('@')[0],
+                role: 'owner',
+                avatar: '👨',
+                color: '#667EEA'
+              })
+
+              // Criar categorias padrão
+              const defaultCategories = ['Casa', 'Trabalho', 'Escola', 'Saúde', 'Família', 'Lazer']
+              for (const cat of defaultCategories) {
+                await supabase.from('categories').insert({
+                  family_id: newFamily.id,
+                  name: cat,
+                  icon: CATEGORY_ICONS[cat] || '📋',
+                  color: COLOR_OPTIONS[defaultCategories.indexOf(cat) % COLOR_OPTIONS.length]
+                })
+              }
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      setAuthError(error.message || 'Erro na autenticação')
     }
   }
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
-    setUser(null)
     setFamily(null)
+    setMembers([])
+    setTasks([])
     setCurrentMember(null)
   }
 
-  if (loading) {
+  // ============================================
+  // FUNÇÕES DE TAREFAS
+  // ============================================
+
+  const getTaskStatus = (task: Task): string => {
+    if (task.status === 'completed') return 'completed'
+    if (task.due_date) {
+      const dueDate = new Date(task.due_date)
+      const now = new Date()
+      if (dueDate < now) return 'overdue'
+    }
+    return task.status
+  }
+
+  const filteredTasks = useMemo(() => {
+    const now = new Date()
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const weekEnd = new Date(today)
+    weekEnd.setDate(weekEnd.getDate() + 7)
+
+    return tasks.filter(task => {
+      if (taskFilter === 'all') return true
+      if (!task.due_date) return taskFilter === 'all'
+      
+      const taskDate = new Date(task.due_date)
+      
+      if (taskFilter === 'today') {
+        return taskDate >= today && taskDate < new Date(today.getTime() + 86400000)
+      }
+      if (taskFilter === 'week') {
+        return taskDate >= today && taskDate < weekEnd
+      }
+      return true
+    }).sort((a, b) => {
+      const statusOrder = { overdue: 0, pending: 1, in_progress: 2, completed: 3 }
+      const statusA = getTaskStatus(a)
+      const statusB = getTaskStatus(b)
+      if (statusOrder[statusA as keyof typeof statusOrder] !== statusOrder[statusB as keyof typeof statusOrder]) {
+        return statusOrder[statusA as keyof typeof statusOrder] - statusOrder[statusB as keyof typeof statusOrder]
+      }
+      return new Date(a.due_date || 0).getTime() - new Date(b.due_date || 0).getTime()
+    })
+  }, [tasks, taskFilter])
+
+  const overdueCount = useMemo(() => {
+    return tasks.filter(t => getTaskStatus(t) === 'overdue').length
+  }, [tasks])
+
+  const toggleTaskStatus = async (task: Task) => {
+    const newStatus = task.status === 'completed' ? 'pending' : 'completed'
+    
+    await supabase
+      .from('tasks')
+      .update({ 
+        status: newStatus,
+        completed_at: newStatus === 'completed' ? new Date().toISOString() : null,
+        completed_by: newStatus === 'completed' ? currentMember?.id : null
+      })
+      .eq('id', task.id)
+
+    loadUserData()
+    showNotification('success', newStatus === 'completed' ? 'Tarefa concluída! ✅' : 'Tarefa reaberta')
+  }
+
+  const deleteTask = async (taskId: string) => {
+    if (!confirm('Excluir esta tarefa?')) return
+    
+    await supabase.from('task_assignments').delete().eq('task_id', taskId)
+    await supabase.from('tasks').delete().eq('id', taskId)
+    
+    loadUserData()
+    showNotification('success', 'Tarefa excluída')
+  }
+
+  const showNotification = (type: 'success' | 'error', message: string) => {
+    setNotification({ type, message })
+    setTimeout(() => setNotification(null), 3000)
+  }
+
+  // ============================================
+  // DADOS DO RELATÓRIO
+  // ============================================
+
+  const reportData = useMemo(() => {
+    const startDate = new Date(reportYear, reportMonth, 1)
+    const endDate = new Date(reportYear, reportMonth + 1, 0, 23, 59, 59)
+
+    // Filtrar tarefas do mês
+    const monthTasks = tasks.filter(task => {
+      if (!task.due_date) return false
+      const taskDate = new Date(task.due_date)
+      return taskDate >= startDate && taskDate <= endDate
+    })
+
+    const total = monthTasks.length
+    const completed = monthTasks.filter(t => t.status === 'completed').length
+    const overdue = monthTasks.filter(t => getTaskStatus(t) === 'overdue').length
+    const pending = monthTasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length
+    const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0
+
+    // Dados por membro
+    const memberStats = members.map(member => {
+      const memberAssignments = assignments.filter(a => a.member_id === member.id)
+      const memberTaskIds = memberAssignments.map(a => a.task_id)
+      const memberTasks = monthTasks.filter(t => memberTaskIds.includes(t.id))
+      
+      const memberTotal = memberTasks.length
+      const memberCompleted = memberTasks.filter(t => t.status === 'completed').length
+      const memberRate = memberTotal > 0 ? Math.round((memberCompleted / memberTotal) * 100) : 0
+
+      return {
+        member,
+        total: memberTotal,
+        completed: memberCompleted,
+        rate: memberRate
+      }
+    }).filter(m => m.total > 0).sort((a, b) => b.rate - a.rate)
+
+    // Dados por categoria
+    const categoryStats = categories.map(category => {
+      const catTasks = monthTasks.filter(t => t.category_id === category.id)
+      const catTotal = catTasks.length
+      const catCompleted = catTasks.filter(t => t.status === 'completed').length
+      
+      return {
+        category,
+        total: catTotal,
+        completed: catCompleted,
+        rate: catTotal > 0 ? Math.round((catCompleted / catTotal) * 100) : 0
+      }
+    }).filter(c => c.total > 0).sort((a, b) => b.total - a.total)
+
+    // Dados por prioridade
+    const priorityStats = {
+      high: monthTasks.filter(t => t.priority === 'high'),
+      medium: monthTasks.filter(t => t.priority === 'medium'),
+      low: monthTasks.filter(t => t.priority === 'low')
+    }
+
+    return {
+      total,
+      completed,
+      overdue,
+      pending,
+      completionRate,
+      memberStats,
+      categoryStats,
+      priorityStats,
+      monthTasks
+    }
+  }, [tasks, assignments, members, categories, reportMonth, reportYear])
+
+  // ============================================
+  // EXPORTAR PDF
+  // ============================================
+
+  const exportToPDF = () => {
+    const content = generateReportHTML()
+    const printWindow = window.open('', '_blank')
+    if (printWindow) {
+      printWindow.document.write(content)
+      printWindow.document.close()
+      printWindow.print()
+    }
+  }
+
+  const generateReportHTML = () => {
+    const { total, completed, overdue, pending, completionRate, memberStats, categoryStats } = reportData
+    const monthName = MONTHS[reportMonth]
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Relatório ${monthName}/${reportYear} - ${family?.name}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+      padding: 40px; 
+      color: #333;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .header { 
+      text-align: center; 
+      margin-bottom: 40px;
+      padding-bottom: 20px;
+      border-bottom: 3px solid #667EEA;
+    }
+    .header h1 { 
+      color: #667EEA; 
+      font-size: 28px;
+      margin-bottom: 8px;
+    }
+    .header p { color: #666; font-size: 14px; }
+    .section { margin-bottom: 30px; }
+    .section-title { 
+      font-size: 18px; 
+      color: #333; 
+      margin-bottom: 15px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #eee;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .stats-grid { 
+      display: grid; 
+      grid-template-columns: repeat(4, 1fr); 
+      gap: 15px; 
+      margin-bottom: 30px;
+    }
+    .stat-card { 
+      background: #f8f9fa; 
+      padding: 20px; 
+      border-radius: 12px; 
+      text-align: center;
+      border-left: 4px solid #667EEA;
+    }
+    .stat-card.completed { border-left-color: #4CAF50; }
+    .stat-card.pending { border-left-color: #FFC107; }
+    .stat-card.overdue { border-left-color: #F44336; }
+    .stat-number { 
+      font-size: 32px; 
+      font-weight: bold; 
+      color: #333;
+    }
+    .stat-label { 
+      font-size: 12px; 
+      color: #666; 
+      text-transform: uppercase;
+      margin-top: 5px;
+    }
+    .member-row { 
+      display: flex; 
+      align-items: center; 
+      padding: 12px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .member-avatar { 
+      font-size: 24px; 
+      margin-right: 12px;
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .member-info { flex: 1; }
+    .member-name { font-weight: 600; }
+    .member-stats { font-size: 13px; color: #666; }
+    .progress-bar { 
+      width: 150px; 
+      height: 8px; 
+      background: #eee; 
+      border-radius: 4px;
+      overflow: hidden;
+      margin-right: 12px;
+    }
+    .progress-fill { 
+      height: 100%; 
+      background: linear-gradient(90deg, #667EEA, #764BA2);
+      border-radius: 4px;
+    }
+    .rate { 
+      font-weight: bold; 
+      min-width: 45px;
+      text-align: right;
+    }
+    .footer { 
+      margin-top: 40px; 
+      text-align: center; 
+      color: #999; 
+      font-size: 12px;
+      padding-top: 20px;
+      border-top: 1px solid #eee;
+    }
+    @media print {
+      body { padding: 20px; }
+      .stat-card { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📊 Relatório Mensal</h1>
+    <p>${monthName} de ${reportYear} • ${family?.name}</p>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-number">${total}</div>
+      <div class="stat-label">Total</div>
+    </div>
+    <div class="stat-card completed">
+      <div class="stat-number">${completed}</div>
+      <div class="stat-label">Concluídas</div>
+    </div>
+    <div class="stat-card pending">
+      <div class="stat-number">${pending}</div>
+      <div class="stat-label">Pendentes</div>
+    </div>
+    <div class="stat-card overdue">
+      <div class="stat-number">${overdue}</div>
+      <div class="stat-label">Atrasadas</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">📈 Taxa de Conclusão: ${completionRate}%</div>
+    <div class="progress-bar" style="width: 100%; height: 20px; margin-bottom: 20px;">
+      <div class="progress-fill" style="width: ${completionRate}%"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">👥 Desempenho por Membro</div>
+    ${memberStats.map(({ member, total, completed, rate }) => `
+      <div class="member-row">
+        <div class="member-avatar" style="background: ${member.color}20">${member.avatar}</div>
+        <div class="member-info">
+          <div class="member-name">${member.name}</div>
+          <div class="member-stats">${completed} de ${total} tarefas</div>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" style="width: ${rate}%; background: ${member.color}"></div>
+        </div>
+        <div class="rate" style="color: ${rate >= 80 ? '#4CAF50' : rate >= 50 ? '#FFC107' : '#F44336'}">${rate}%</div>
+      </div>
+    `).join('')}
+  </div>
+
+  <div class="section">
+    <div class="section-title">📂 Por Categoria</div>
+    ${categoryStats.map(({ category, total, completed, rate }) => `
+      <div class="member-row">
+        <div class="member-avatar">${category.icon}</div>
+        <div class="member-info">
+          <div class="member-name">${category.name}</div>
+          <div class="member-stats">${completed} de ${total} tarefas</div>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" style="width: ${rate}%"></div>
+        </div>
+        <div class="rate">${rate}%</div>
+      </div>
+    `).join('')}
+  </div>
+
+  <div class="footer">
+    Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')} • FamíliaTask
+  </div>
+</body>
+</html>
+    `
+  }
+
+  // ============================================
+  // COMPONENTE DE RELATÓRIO
+  // ============================================
+
+  const ReportTab = () => {
+    const { total, completed, overdue, pending, completionRate, memberStats, categoryStats } = reportData
+
+    const prevMonth = () => {
+      if (reportMonth === 0) {
+        setReportMonth(11)
+        setReportYear(reportYear - 1)
+      } else {
+        setReportMonth(reportMonth - 1)
+      }
+    }
+
+    const nextMonth = () => {
+      if (reportMonth === 11) {
+        setReportMonth(0)
+        setReportYear(reportYear + 1)
+      } else {
+        setReportMonth(reportMonth + 1)
+      }
+    }
+
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center animate-pulse">
-            <Home className="w-8 h-8 text-white" />
+      <div className="space-y-6">
+        {/* Navegação do Mês */}
+        <div className="flex items-center justify-between">
+          <button onClick={prevMonth} className="p-2 rounded-xl bg-white/10 hover:bg-white/20">
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+          <div className="text-center">
+            <h2 className="text-xl font-bold">{MONTHS[reportMonth]}</h2>
+            <p className="text-white/60">{reportYear}</p>
           </div>
-          <p className="text-white/60">Carregando...</p>
+          <button onClick={nextMonth} className="p-2 rounded-xl bg-white/10 hover:bg-white/20">
+            <ChevronRight className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Cards de Resumo */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-violet-500/20 to-fuchsia-500/20 border border-white/10">
+            <div className="flex items-center gap-2 mb-2">
+              <Target className="w-5 h-5 text-violet-400" />
+              <span className="text-sm text-white/60">Total</span>
+            </div>
+            <p className="text-3xl font-bold">{total}</p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-green-500/20 to-emerald-500/20 border border-white/10">
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle className="w-5 h-5 text-green-400" />
+              <span className="text-sm text-white/60">Concluídas</span>
+            </div>
+            <p className="text-3xl font-bold text-green-400">{completed}</p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 border border-white/10">
+            <div className="flex items-center gap-2 mb-2">
+              <Clock className="w-5 h-5 text-amber-400" />
+              <span className="text-sm text-white/60">Pendentes</span>
+            </div>
+            <p className="text-3xl font-bold text-amber-400">{pending}</p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-red-500/20 to-rose-500/20 border border-white/10">
+            <div className="flex items-center gap-2 mb-2">
+              <AlertCircle className="w-5 h-5 text-red-400" />
+              <span className="text-sm text-white/60">Atrasadas</span>
+            </div>
+            <p className="text-3xl font-bold text-red-400">{overdue}</p>
+          </div>
+        </div>
+
+        {/* Taxa de Conclusão */}
+        <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Percent className="w-5 h-5 text-violet-400" />
+              <span className="font-medium">Taxa de Conclusão</span>
+            </div>
+            <span className={`text-2xl font-bold ${
+              completionRate >= 80 ? 'text-green-400' : 
+              completionRate >= 50 ? 'text-amber-400' : 'text-red-400'
+            }`}>
+              {completionRate}%
+            </span>
+          </div>
+          <div className="h-3 bg-white/10 rounded-full overflow-hidden">
+            <div 
+              className={`h-full rounded-full transition-all duration-500 ${
+                completionRate >= 80 ? 'bg-gradient-to-r from-green-500 to-emerald-500' :
+                completionRate >= 50 ? 'bg-gradient-to-r from-amber-500 to-orange-500' :
+                'bg-gradient-to-r from-red-500 to-rose-500'
+              }`}
+              style={{ width: `${completionRate}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Desempenho por Membro */}
+        {memberStats.length > 0 && (
+          <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+            <div className="flex items-center gap-2 mb-4">
+              <Award className="w-5 h-5 text-amber-400" />
+              <span className="font-medium">Desempenho por Membro</span>
+            </div>
+            <div className="space-y-3">
+              {memberStats.map(({ member, total, completed, rate }, index) => (
+                <div key={member.id} className="flex items-center gap-3">
+                  {index === 0 && <span className="text-lg">🥇</span>}
+                  {index === 1 && <span className="text-lg">🥈</span>}
+                  {index === 2 && <span className="text-lg">🥉</span>}
+                  {index > 2 && <span className="w-7" />}
+                  
+                  <div 
+                    className="w-10 h-10 rounded-xl flex items-center justify-center text-lg"
+                    style={{ backgroundColor: member.color + '30' }}
+                  >
+                    {member.avatar}
+                  </div>
+                  
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium">{member.name}</span>
+                      <span className={`text-sm font-bold ${
+                        rate >= 80 ? 'text-green-400' : 
+                        rate >= 50 ? 'text-amber-400' : 'text-red-400'
+                      }`}>
+                        {rate}%
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{ 
+                            width: `${rate}%`,
+                            backgroundColor: member.color
+                          }}
+                        />
+                      </div>
+                      <span className="text-xs text-white/40">{completed}/{total}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Por Categoria */}
+        {categoryStats.length > 0 && (
+          <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+            <div className="flex items-center gap-2 mb-4">
+              <BarChart3 className="w-5 h-5 text-blue-400" />
+              <span className="font-medium">Por Categoria</span>
+            </div>
+            <div className="space-y-3">
+              {categoryStats.map(({ category, total, completed, rate }) => (
+                <div key={category.id} className="flex items-center gap-3">
+                  <span className="text-xl w-8 text-center">{category.icon}</span>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm">{category.name}</span>
+                      <span className="text-xs text-white/60">{completed}/{total}</span>
+                    </div>
+                    <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-all duration-500"
+                        style={{ width: `${rate}%` }}
+                      />
+                    </div>
+                  </div>
+                  <span className="text-sm font-medium w-10 text-right">{rate}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Botão Exportar */}
+        <button
+          onClick={exportToPDF}
+          className="w-full py-4 rounded-2xl bg-gradient-to-r from-violet-500 to-fuchsia-500 font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
+        >
+          <Download className="w-5 h-5" />
+          Exportar PDF
+        </button>
+
+        {total === 0 && (
+          <div className="text-center py-8 text-white/40">
+            <BarChart3 className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>Nenhuma tarefa neste mês</p>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ============================================
+  // COMPONENTES DE UI
+  // ============================================
+
+  const TaskCard = ({ task }: { task: Task }) => {
+    const status = getTaskStatus(task)
+    const config = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG]
+    const category = categories.find(c => c.id === task.category_id)
+    const taskAssignments = assignments.filter(a => a.task_id === task.id)
+    const assignedMembers = members.filter(m => taskAssignments.some(a => a.member_id === m.id))
+    const completedByMember = members.find(m => m.id === task.completed_by)
+
+    return (
+      <div className={`p-4 rounded-2xl border transition-all ${
+        status === 'completed' ? 'bg-green-500/10 border-green-500/30' :
+        status === 'overdue' ? 'bg-red-500/10 border-red-500/30' :
+        'bg-white/5 border-white/10'
+      }`}>
+        <div className="flex items-start gap-3">
+          <button
+            onClick={() => toggleTaskStatus(task)}
+            className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center flex-shrink-0 mt-0.5 transition-all ${
+              status === 'completed' 
+                ? 'bg-green-500 border-green-500' 
+                : 'border-white/30 hover:border-white/50'
+            }`}
+          >
+            {status === 'completed' && <Check className="w-4 h-4" />}
+          </button>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              {category && <span className="text-sm">{category.icon}</span>}
+              <h3 className={`font-medium truncate ${status === 'completed' ? 'line-through text-white/50' : ''}`}>
+                {task.title}
+              </h3>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-white/50">
+              {task.due_date && (
+                <span className={status === 'overdue' ? 'text-red-400' : ''}>
+                  {new Date(task.due_date).toLocaleDateString('pt-BR')}
+                  {task.due_time && ` ${task.due_time.slice(0, 5)}`}
+                </span>
+              )}
+              {task.recurrence_type && task.recurrence_type !== 'none' && (
+                <span className="flex items-center gap-1">
+                  <Repeat className="w-3 h-3" />
+                </span>
+              )}
+            </div>
+
+            {assignedMembers.length > 0 && (
+              <div className="flex items-center gap-1 mt-2">
+                {assignedMembers.slice(0, 3).map(member => (
+                  <div
+                    key={member.id}
+                    className="w-6 h-6 rounded-lg flex items-center justify-center text-xs"
+                    style={{ backgroundColor: member.color + '40' }}
+                    title={member.name}
+                  >
+                    {member.avatar}
+                  </div>
+                ))}
+                {assignedMembers.length > 3 && (
+                  <span className="text-xs text-white/40">+{assignedMembers.length - 3}</span>
+                )}
+              </div>
+            )}
+
+            {status === 'completed' && completedByMember && (
+              <p className="text-xs text-green-400 mt-2">
+                ✓ Concluída por {completedByMember.name}
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => { setEditingTask(task); setShowTaskModal(true) }}
+              className="p-2 rounded-lg hover:bg-white/10"
+            >
+              <Edit3 className="w-4 h-4 text-white/50" />
+            </button>
+            <button
+              onClick={() => deleteTask(task.id)}
+              className="p-2 rounded-lg hover:bg-red-500/20"
+            >
+              <Trash2 className="w-4 h-4 text-red-400/50" />
+            </button>
+          </div>
         </div>
       </div>
     )
   }
 
-  if (!user || !family) {
-    return <AuthScreen mode={authMode} setMode={setAuthMode} onSuccess={checkUser} showToast={showToast} />
+  // ============================================
+  // TELA DE LOGIN
+  // ============================================
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-violet-950 to-slate-900 flex items-center justify-center">
+        <div className="animate-spin w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full" />
+      </div>
+    )
   }
 
-  // Filtrar tarefas
-  const filteredTasks = tasks.filter(task => {
-    // Filtro por período
-    if (filterPeriod === 'today' && task.due_date && !isToday(task.due_date)) return false
-    if (filterPeriod === 'week' && task.due_date && !isThisWeek(task.due_date)) return false
-    
-    // Filtro por membro
-    if (filterMember !== 'all') {
-      const assignments = task.task_assignments?.map((a: TaskAssignment) => a.member_id) || []
-      if (filterMember === 'family' && !task.is_for_everyone) return false
-      if (filterMember !== 'family' && !assignments.includes(filterMember) && !task.is_for_everyone) return false
-    }
-    
-    // Filtro por status
-    if (filterStatus !== 'all') {
-      const realStatus = getTaskStatus(task)
-      if (realStatus !== filterStatus) return false
-    }
-    
-    return true
-  })
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-violet-950 to-slate-900 flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <div className="text-6xl mb-4">👨‍👩‍👧‍👦</div>
+            <h1 className="text-3xl font-bold text-white mb-2">FamíliaTask</h1>
+            <p className="text-white/60">Organize as tarefas da sua família</p>
+          </div>
 
-  // Ordenar: atrasadas primeiro, depois por data
-  const sortedTasks = [...filteredTasks].sort((a, b) => {
-    const statusA = getTaskStatus(a)
-    const statusB = getTaskStatus(b)
-    
-    // Atrasadas primeiro
-    if (statusA === 'overdue' && statusB !== 'overdue') return -1
-    if (statusB === 'overdue' && statusA !== 'overdue') return 1
-    
-    // Depois por data
-    if (a.due_date && b.due_date) {
-      return new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
-    }
-    return 0
-  })
+          <div className="bg-white/10 backdrop-blur-xl rounded-3xl p-6 border border-white/20">
+            <div className="flex mb-6 bg-white/10 rounded-xl p-1">
+              <button
+                onClick={() => setAuthMode('login')}
+                className={`flex-1 py-2 rounded-lg font-medium transition-all ${authMode === 'login' ? 'bg-violet-500' : ''}`}
+              >
+                Entrar
+              </button>
+              <button
+                onClick={() => setAuthMode('register')}
+                className={`flex-1 py-2 rounded-lg font-medium transition-all ${authMode === 'register' ? 'bg-violet-500' : ''}`}
+              >
+                Criar Conta
+              </button>
+            </div>
 
-  // Contadores
-  const todayCount = tasks.filter(t => t.due_date && isToday(t.due_date) && t.status !== 'completed').length
-  const overdueCount = tasks.filter(t => getTaskStatus(t) === 'overdue').length
+            <form onSubmit={handleAuth} className="space-y-4">
+              <div>
+                <label className="block text-sm text-white/60 mb-2">Email</label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white"
+                    placeholder="seu@email.com"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm text-white/60 mb-2">Senha</label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white"
+                    placeholder="••••••••"
+                    required
+                    minLength={6}
+                  />
+                </div>
+              </div>
+
+              {authMode === 'register' && (
+                <div>
+                  <label className="block text-sm text-white/60 mb-2">
+                    Código de Convite <span className="text-white/40">(opcional)</span>
+                  </label>
+                  <div className="relative">
+                    <Share2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
+                    <input
+                      type="text"
+                      value={inviteCode}
+                      onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                      className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white uppercase"
+                      placeholder="ABC123"
+                      maxLength={6}
+                    />
+                  </div>
+                  <p className="text-xs text-white/40 mt-1">
+                    Tem código? Entre na família existente. Não tem? Crie uma nova!
+                  </p>
+                </div>
+              )}
+
+              {authError && (
+                <div className="p-3 rounded-xl bg-red-500/20 border border-red-500/30 text-red-300 text-sm">
+                  {authError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 font-bold hover:opacity-90 transition-opacity"
+              >
+                {authMode === 'login' ? 'Entrar' : 'Criar Conta'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ============================================
+  // APP PRINCIPAL
+  // ============================================
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
-      <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-xl border-b border-white/10 safe-area-pt">
-        <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-violet-500/30">
-              <Home className="w-5 h-5 text-white" />
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-violet-950 to-slate-900 text-white">
+      {/* Header */}
+      <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-xl border-b border-white/10">
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div 
+                className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
+                style={{ backgroundColor: currentMember?.color }}
+              >
+                {currentMember?.avatar}
+              </div>
+              <div>
+                <h1 className="font-bold">{family?.name}</h1>
+                <p className="text-xs text-white/50">{members.length} membros</p>
+              </div>
             </div>
-            <div>
-              <h1 className="font-bold text-lg">{family.name}</h1>
-              <p className="text-xs text-white/60">FamíliaTask</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {isAdmin && (
-              <button onClick={() => setShowCodeModal(true)} className="p-2 rounded-lg bg-white/10 hover:bg-white/20">
-                <Share2 className="w-5 h-5" />
+            {activeTab === 'tasks' && (
+              <button
+                onClick={() => { setEditingTask(null); setShowTaskModal(true) }}
+                className="w-10 h-10 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 flex items-center justify-center"
+              >
+                <Plus className="w-5 h-5" />
               </button>
             )}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10">
-              <span className="text-xl">{currentMember?.avatar}</span>
-              <span className="text-sm font-medium">{currentMember?.name}</span>
-            </div>
           </div>
         </div>
       </header>
 
-      <main className="max-w-lg mx-auto px-4 pb-24">
+      {/* Conteúdo */}
+      <main className="px-4 py-4 pb-24">
         {activeTab === 'tasks' && (
-          <div className="py-4 space-y-4">
-            {/* Resumo */}
-            <div className="flex gap-3">
-              {overdueCount > 0 && (
-                <div className="flex-1 p-3 rounded-xl bg-red-500/20 border border-red-500/30">
-                  <p className="text-2xl font-bold text-red-400">{overdueCount}</p>
-                  <p className="text-xs text-red-300">Atrasadas</p>
-                </div>
-              )}
-              <div className="flex-1 p-3 rounded-xl bg-violet-500/20 border border-violet-500/30">
-                <p className="text-2xl font-bold text-violet-400">{todayCount}</p>
-                <p className="text-xs text-violet-300">Para hoje</p>
+          <div className="space-y-4">
+            {/* Filtros */}
+            <div className="flex gap-2">
+              {(['today', 'week', 'all'] as const).map(filter => (
+                <button
+                  key={filter}
+                  onClick={() => setTaskFilter(filter)}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                    taskFilter === filter 
+                      ? 'bg-violet-500' 
+                      : 'bg-white/10 hover:bg-white/20'
+                  }`}
+                >
+                  {filter === 'today' ? 'Hoje' : filter === 'week' ? 'Semana' : 'Todas'}
+                </button>
+              ))}
+            </div>
+
+            {/* Lista de Tarefas */}
+            {filteredTasks.length > 0 ? (
+              <div className="space-y-3">
+                {filteredTasks.map(task => (
+                  <TaskCard key={task.id} task={task} />
+                ))}
               </div>
-            </div>
-
-            {/* Filtro por período */}
-            <div className="flex gap-1 p-1 bg-white/5 rounded-xl">
-              <button 
-                onClick={() => setFilterPeriod('today')} 
-                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${filterPeriod === 'today' ? 'bg-violet-500 text-white' : 'text-white/60'}`}
-              >
-                Hoje
-              </button>
-              <button 
-                onClick={() => setFilterPeriod('week')} 
-                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${filterPeriod === 'week' ? 'bg-violet-500 text-white' : 'text-white/60'}`}
-              >
-                Semana
-              </button>
-              <button 
-                onClick={() => setFilterPeriod('all')} 
-                className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all ${filterPeriod === 'all' ? 'bg-violet-500 text-white' : 'text-white/60'}`}
-              >
-                Todas
-              </button>
-            </div>
-
-            {/* Outros filtros */}
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-              <select value={filterMember} onChange={(e) => setFilterMember(e.target.value)} className="px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-sm">
-                <option value="all">👥 Todos</option>
-                <option value="family">👨‍👩‍👧‍👦 Família</option>
-                {members.map(m => <option key={m.id} value={m.id}>{m.avatar} {m.name}</option>)}
-              </select>
-              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-sm">
-                <option value="all">📋 Todos</option>
-                <option value="pending">⏳ Pendente</option>
-                <option value="overdue">🔴 Atrasada</option>
-                <option value="completed">✅ Concluída</option>
-              </select>
-            </div>
-
-            {/* Lista de tarefas */}
-            <div className="space-y-3">
-              {sortedTasks.length === 0 ? (
-                <div className="text-center py-12 text-white/60">
-                  <CheckCircle className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                  <p>{filterPeriod === 'today' ? 'Nenhuma tarefa para hoje!' : 'Nenhuma tarefa encontrada'}</p>
-                  <p className="text-sm mt-2">Toque no + para criar</p>
-                </div>
-              ) : (
-                sortedTasks.map(task => {
-                  const category = categories.find(c => c.id === task.category_id)
-                  const assignments = task.task_assignments?.map((a: TaskAssignment) => a.member_id) || []
-                  const assignedMembers = members.filter(m => assignments.includes(m.id))
-                  const canComplete = isAdmin || task.is_for_everyone || assignments.includes(currentMember?.id || '')
-                  const realStatus = getTaskStatus(task)
-                  const statusConfig = STATUS_CONFIG[realStatus as keyof typeof STATUS_CONFIG]
-                  const completedByMember = task.completed_by ? members.find(m => m.id === task.completed_by) : null
-                  
-                  return (
-                    <div key={task.id} className={`p-4 rounded-2xl bg-white/5 border transition-all ${
-                      realStatus === 'completed' ? 'border-green-500/30 opacity-70' : 
-                      realStatus === 'overdue' ? 'border-red-500/50 bg-red-500/5' : 'border-white/10'
-                    }`}>
-                      <div className="flex items-start gap-3">
-                        <button
-                          onClick={async () => {
-                            if (!canComplete) return
-                            const newStatus = task.status === 'completed' ? 'pending' : 'completed'
-                            await supabase.from('tasks').update({ 
-                              status: newStatus, 
-                              completed_by: newStatus === 'completed' ? currentMember?.id : null, 
-                              completed_at: newStatus === 'completed' ? new Date().toISOString() : null 
-                            }).eq('id', task.id)
-                            if (user) loadFamilyData(user.id)
-                            if (newStatus === 'completed') {
-                              showToast('Tarefa concluída! ✅', 'success')
-                            }
-                          }}
-                          disabled={!canComplete}
-                          className={`mt-1 w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all ${
-                            realStatus === 'completed' ? 'bg-green-500 border-green-500' : 
-                            realStatus === 'overdue' ? 'border-red-500 hover:bg-red-500/20' :
-                            canComplete ? 'border-white/30 hover:border-violet-500 hover:bg-violet-500/20' : 'border-white/20 opacity-50'
-                          }`}
-                        >
-                          {realStatus === 'completed' && <Check className="w-4 h-4 text-white" />}
-                        </button>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-lg">{category?.icon || '📋'}</span>
-                            <h3 className={`font-medium ${realStatus === 'completed' ? 'line-through text-white/50' : ''}`}>{task.title}</h3>
-                            {task.priority === 'high' && <Star className="w-4 h-4 text-amber-400 fill-amber-400" />}
-                            {task.recurrence_type && <Repeat className="w-4 h-4 text-violet-400" />}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-white/60">
-                            {task.due_date && (
-                              <span className={`flex items-center gap-1 ${realStatus === 'overdue' ? 'text-red-400 font-medium' : ''}`}>
-                                <Calendar className="w-3 h-3" />
-                                {isToday(task.due_date) ? 'Hoje' : new Date(task.due_date).toLocaleDateString('pt-BR')}
-                              </span>
-                            )}
-                            {task.due_time && (
-                              <span className={`flex items-center gap-1 ${realStatus === 'overdue' ? 'text-red-400' : ''}`}>
-                                <Clock className="w-3 h-3" />
-                                {task.due_time.substring(0, 5)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 mt-2 flex-wrap">
-                            {task.is_for_everyone ? (
-                              <span className="px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 text-xs">👨‍👩‍👧‍👦 Família</span>
-                            ) : assignedMembers.length > 0 ? (
-                              <div className="flex items-center gap-1">
-                                {assignedMembers.slice(0, 3).map(m => (
-                                  <span key={m.id} className="text-sm">{m.avatar}</span>
-                                ))}
-                                {assignedMembers.length > 3 && <span className="text-xs text-white/60">+{assignedMembers.length - 3}</span>}
-                              </div>
-                            ) : null}
-                            <span className="px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: statusConfig.bg, color: statusConfig.color }}>
-                              {statusConfig.label}
-                            </span>
-                          </div>
-                          {realStatus === 'completed' && completedByMember && (
-                            <div className="flex items-center gap-1 mt-2 text-xs text-green-400">
-                              <Check className="w-3 h-3" />
-                              <span>Por {completedByMember.avatar} {completedByMember.name}</span>
-                            </div>
-                          )}
-                        </div>
-                        <button onClick={() => { setEditingTask(task); setShowTaskModal(true) }} className="p-2 rounded-lg hover:bg-white/10">
-                          <Edit3 className="w-5 h-5 text-white/60" />
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
+            ) : (
+              <div className="text-center py-12 text-white/40">
+                <CheckCircle className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p>Nenhuma tarefa {taskFilter === 'today' ? 'para hoje' : taskFilter === 'week' ? 'esta semana' : ''}</p>
+              </div>
+            )}
           </div>
         )}
 
+        {activeTab === 'report' && <ReportTab />}
+
         {activeTab === 'family' && (
-          <div className="py-4 space-y-6">
-            {isAdmin && family.invite_code && (
-              <div className="p-4 rounded-2xl bg-gradient-to-r from-violet-600/20 to-fuchsia-600/20 border border-violet-500/30">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="font-semibold flex items-center gap-2"><Share2 className="w-5 h-5" />Código de Convite</h3>
-                </div>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 px-4 py-3 rounded-xl bg-black/30 font-mono text-2xl tracking-widest text-center">{family.invite_code}</code>
-                  <button onClick={copyInviteCode} className="p-3 rounded-xl bg-violet-500 hover:bg-violet-600"><Copy className="w-5 h-5" /></button>
-                </div>
-                <p className="text-xs text-white/60 mt-2">Compartilhe para adicionar membros</p>
+          <div className="space-y-4">
+            <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-bold">Membros da Família</h2>
+                <span className="text-sm text-white/50">{members.length}</span>
               </div>
-            )}
-            <div>
-              <h3 className="font-semibold text-lg mb-4">Membros ({members.length})</h3>
               <div className="space-y-3">
                 {members.map(member => {
-                  const roleConfig = MEMBER_ROLES[member.role as keyof typeof MEMBER_ROLES]
-                  // Contar tarefas concluídas do membro este mês
-                  const memberCompletedTasks = tasks.filter(t => 
-                    t.completed_by === member.id && 
+                  const RoleIcon = MEMBER_ROLES[member.role as keyof typeof MEMBER_ROLES]?.icon || Users
+                  const memberTasks = tasks.filter(t => 
+                    assignments.some(a => a.task_id === t.id && a.member_id === member.id) &&
                     t.status === 'completed'
-                  ).length
-                  
+                  )
                   return (
-                    <div key={member.id} className={`p-4 rounded-2xl bg-white/5 border ${member.is_temporary ? 'border-dashed border-amber-500/50' : 'border-white/10'}`}>
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl" style={{ backgroundColor: member.color }}>{member.avatar}</div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium">{member.name}</span>
-                            {member.user_id === user?.id && <span className="px-2 py-0.5 rounded text-xs bg-white/20">Você</span>}
-                          </div>
-                          <div className="flex items-center gap-2 text-sm text-white/60">
-                            {React.createElement(roleConfig.icon, { className: 'w-4 h-4', style: { color: roleConfig.color } })}
-                            <span>{roleConfig.label}</span>
-                            <span className="text-white/40">•</span>
-                            <span className="text-green-400">{memberCompletedTasks} concluídas</span>
-                          </div>
+                    <div key={member.id} className="flex items-center gap-3 p-3 rounded-xl bg-white/5">
+                      <div 
+                        className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+                        style={{ backgroundColor: member.color + '30' }}
+                      >
+                        {member.avatar}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{member.name}</span>
+                          <RoleIcon className="w-4 h-4" style={{ color: MEMBER_ROLES[member.role as keyof typeof MEMBER_ROLES]?.color }} />
                         </div>
+                        <p className="text-xs text-white/50">
+                          {memberTasks.length} tarefas concluídas
+                        </p>
                       </div>
                     </div>
                   )
                 })}
               </div>
             </div>
+
+            {/* Código de Convite */}
+            {(currentMember?.role === 'owner' || currentMember?.role === 'admin') && family?.invite_code && (
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-violet-500/20 to-fuchsia-500/20 border border-white/10">
+                <h3 className="font-medium mb-2 flex items-center gap-2">
+                  <Share2 className="w-4 h-4" />
+                  Código de Convite
+                </h3>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 py-2 px-3 rounded-lg bg-white/10 font-mono text-lg tracking-wider">
+                    {family.invite_code}
+                  </code>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(family.invite_code)
+                      showNotification('success', 'Código copiado!')
+                    }}
+                    className="p-2 rounded-lg bg-white/10 hover:bg-white/20"
+                  >
+                    <Copy className="w-5 h-5" />
+                  </button>
+                </div>
+                <p className="text-xs text-white/50 mt-2">
+                  Compartilhe este código para convidar novos membros
+                </p>
+              </div>
+            )}
           </div>
         )}
 
         {activeTab === 'settings' && (
-          <SettingsTab 
-            user={user} 
-            currentMember={currentMember} 
-            onLogout={handleLogout} 
-            onUpdate={async (updates: any) => {
-              if (currentMember) {
-                await supabase.from('family_members').update(updates).eq('id', currentMember.id)
-                if (user) loadFamilyData(user.id)
-                showToast('Perfil atualizado!', 'success')
-              }
-            }}
-          />
+          <div className="space-y-4">
+            <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+              <h3 className="font-medium mb-4">Meu Perfil</h3>
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5">
+                <div 
+                  className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+                  style={{ backgroundColor: currentMember?.color }}
+                >
+                  {currentMember?.avatar}
+                </div>
+                <div>
+                  <p className="font-medium">{currentMember?.name}</p>
+                  <p className="text-sm text-white/60">{user?.email}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+              <h3 className="font-medium mb-4">Conta</h3>
+              <button 
+                onClick={handleLogout}
+                className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-red-500/20 text-red-400"
+              >
+                <LogOut className="w-5 h-5" />
+                <span>Sair da conta</span>
+              </button>
+            </div>
+          </div>
         )}
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur-xl border-t border-white/10 safe-area-pb">
-        <div className="max-w-lg mx-auto flex">
+      {/* Menu Inferior */}
+      <nav className="fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-xl border-t border-white/10 px-4 py-2 z-50">
+        <div className="flex justify-around">
           {[
-            { id: 'tasks', icon: Check, label: 'Tarefas', badge: overdueCount > 0 ? overdueCount : null },
+            { id: 'tasks', icon: Home, label: 'Início', badge: overdueCount },
+            { id: 'report', icon: BarChart3, label: 'Relatório' },
             { id: 'family', icon: Users, label: 'Família' },
             { id: 'settings', icon: Settings, label: 'Config' }
           ].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex-1 flex flex-col items-center py-3 relative ${activeTab === tab.id ? 'text-violet-400' : 'text-white/60'}`}>
-              <tab.icon className="w-6 h-6 mb-1" />
-              <span className="text-xs">{tab.label}</span>
-              {tab.badge && (
-                <span className="absolute top-2 right-1/4 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center font-bold">{tab.badge}</span>
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex flex-col items-center py-2 px-4 rounded-xl transition-all relative ${
+                activeTab === tab.id ? 'text-violet-400' : 'text-white/50'
+              }`}
+            >
+              <tab.icon className="w-6 h-6" />
+              <span className="text-xs mt-1">{tab.label}</span>
+              {tab.badge && tab.badge > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-xs flex items-center justify-center">
+                  {tab.badge}
+                </span>
               )}
             </button>
           ))}
         </div>
       </nav>
 
-      {activeTab === 'tasks' && currentMember?.role !== 'visitor' && (
-        <button onClick={() => { setEditingTask(null); setShowTaskModal(true) }} className="fixed bottom-20 right-4 w-14 h-14 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 shadow-lg flex items-center justify-center">
-          <Plus className="w-7 h-7 text-white" />
-        </button>
-      )}
-
-      {showTaskModal && (
-        <TaskModal
-          task={editingTask}
-          categories={categories}
-          members={members}
-          familyId={family.id}
-          currentMemberId={currentMember?.id}
-          isAdmin={isAdmin}
-          onSave={async (taskData: any, selectedMembers: string[], isRecurring: boolean, recurringDates: Date[]) => {
-            try {
-              if (editingTask) {
-                // Atualizar tarefa existente
-                await supabase.from('tasks').update(taskData).eq('id', editingTask.id)
-                await supabase.from('task_assignments').delete().eq('task_id', editingTask.id)
-                if (!taskData.is_for_everyone && selectedMembers.length > 0) {
-                  const assignments = selectedMembers.map(memberId => ({
-                    task_id: editingTask.id,
-                    member_id: memberId,
-                    family_id: family.id
-                  }))
-                  await supabase.from('task_assignments').insert(assignments)
-                }
-                showToast('Tarefa atualizada!', 'success')
-              } else if (isRecurring && recurringDates.length > 0) {
-                // Criar múltiplas tarefas para recorrência
-                for (const date of recurringDates) {
-                  const { data: newTask } = await supabase.from('tasks').insert({ 
-                    ...taskData, 
-                    due_date: date.toISOString().split('T')[0],
-                    family_id: family.id, 
-                    created_by: currentMember?.id 
-                  }).select().single()
-                  
-                  if (newTask && !taskData.is_for_everyone && selectedMembers.length > 0) {
-                    const assignments = selectedMembers.map(memberId => ({
-                      task_id: newTask.id,
-                      member_id: memberId,
-                      family_id: family.id
-                    }))
-                    await supabase.from('task_assignments').insert(assignments)
-                  }
-                }
-                showToast(`${recurringDates.length} tarefas criadas!`, 'success')
-              } else {
-                // Criar tarefa única
-                const { data: newTask } = await supabase.from('tasks').insert({ 
-                  ...taskData, 
-                  family_id: family.id, 
-                  created_by: currentMember?.id 
-                }).select().single()
-                
-                if (newTask && !taskData.is_for_everyone && selectedMembers.length > 0) {
-                  const assignments = selectedMembers.map(memberId => ({
-                    task_id: newTask.id,
-                    member_id: memberId,
-                    family_id: family.id
-                  }))
-                  await supabase.from('task_assignments').insert(assignments)
-                }
-                showToast('Tarefa criada!', 'success')
-              }
-              
-              setShowTaskModal(false)
-              setEditingTask(null)
-              if (user) loadFamilyData(user.id)
-            } catch (error: any) {
-              showToast('Erro: ' + error.message, 'error')
-            }
-          }}
-          onDelete={editingTask && isAdmin ? async () => {
-            await supabase.from('task_assignments').delete().eq('task_id', editingTask.id)
-            await supabase.from('tasks').delete().eq('id', editingTask.id)
-            setShowTaskModal(false)
-            setEditingTask(null)
-            if (user) loadFamilyData(user.id)
-            showToast('Tarefa excluída', 'success')
-          } : undefined}
-          onClose={() => { setShowTaskModal(false); setEditingTask(null) }}
-        />
-      )}
-
-      {showCodeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="w-full max-w-sm p-6 rounded-3xl bg-slate-800 border border-white/10">
-            <h3 className="text-xl font-bold mb-4 text-center">Convide sua Família!</h3>
-            <code className="block px-6 py-4 rounded-2xl bg-gradient-to-r from-violet-600/30 to-fuchsia-600/30 font-mono text-3xl tracking-widest text-center mb-4">{family.invite_code || 'N/A'}</code>
-            <p className="text-sm text-white/60 text-center mb-4">Compartilhe este código</p>
-            <div className="flex gap-2">
-              <button onClick={copyInviteCode} className="flex-1 py-3 rounded-xl bg-violet-500 font-medium flex items-center justify-center gap-2"><Copy className="w-5 h-5" />Copiar</button>
-              <button onClick={() => setShowCodeModal(false)} className="px-6 py-3 rounded-xl bg-white/10 font-medium">Fechar</button>
-            </div>
-          </div>
+      {/* Notificação */}
+      {notification && (
+        <div className={`fixed top-4 left-4 right-4 p-4 rounded-2xl z-50 flex items-center gap-3 ${
+          notification.type === 'success' 
+            ? 'bg-green-500/90' 
+            : 'bg-red-500/90'
+        }`}>
+          {notification.type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+          <span className="font-medium">{notification.message}</span>
         </div>
       )}
-
-      {toast && (
-        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 ${toast.type === 'error' ? 'bg-red-500' : 'bg-green-500'}`}>
-          {toast.type === 'error' ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
-          <span className="font-medium">{toast.message}</span>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ==================== AUTH SCREEN (SIMPLIFICADO - 2 ABAS) ====================
-function AuthScreen({ mode, setMode, onSuccess, showToast }: { mode: 'login' | 'register'; setMode: (m: any) => void; onSuccess: () => void; showToast: (m: string, t: 'success' | 'error') => void }) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [name, setName] = useState('')
-  const [familyName, setFamilyName] = useState('')
-  const [inviteCode, setInviteCode] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  const generateInviteCode = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-    let code = ''
-    for (let i = 0; i < 8; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length))
-    }
-    return code
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-
-    try {
-      if (mode === 'login') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) {
-          showToast(error.message, 'error')
-        } else {
-          onSuccess()
-        }
-      } else if (mode === 'register') {
-        const hasInviteCode = inviteCode.trim().length > 0
-
-        const { data: authData, error: authError } = await supabase.auth.signUp({ email, password })
-        if (authError || !authData.user) {
-          showToast(authError?.message || 'Erro ao criar conta', 'error')
-          setLoading(false)
-          return
-        }
-
-        if (hasInviteCode) {
-          const { data: familyData, error: familyError } = await supabase
-            .from('families')
-            .select('id')
-            .eq('invite_code', inviteCode.toUpperCase())
-            .single()
-
-          if (familyError || !familyData) {
-            showToast('Código de convite inválido', 'error')
-            setLoading(false)
-            return
-          }
-
-          const { error: memberError } = await supabase
-            .from('family_members')
-            .insert({ 
-              family_id: familyData.id, 
-              user_id: authData.user.id, 
-              name: name, 
-              role: 'member', 
-              email: email, 
-              avatar: '👤', 
-              color: '#4CAF50' 
-            })
-
-          if (memberError) {
-            showToast('Erro ao entrar na família', 'error')
-            setLoading(false)
-            return
-          }
-
-          showToast('Você entrou na família!', 'success')
-        } else {
-          if (!familyName.trim()) {
-            showToast('Digite o nome da família', 'error')
-            setLoading(false)
-            return
-          }
-
-          const newInviteCode = generateInviteCode()
-          const { data: familyData, error: familyError } = await supabase
-            .from('families')
-            .insert({ 
-              name: familyName, 
-              owner_id: authData.user.id,
-              invite_code: newInviteCode
-            })
-            .select()
-            .single()
-
-          if (familyError || !familyData) {
-            showToast('Erro ao criar família: ' + (familyError?.message || 'desconhecido'), 'error')
-            setLoading(false)
-            return
-          }
-
-          const { error: memberError } = await supabase
-            .from('family_members')
-            .insert({ 
-              family_id: familyData.id, 
-              user_id: authData.user.id, 
-              name: name, 
-              role: 'owner', 
-              email: email, 
-              avatar: '👨', 
-              color: '#667EEA' 
-            })
-
-          if (memberError) {
-            showToast('Erro ao criar membro: ' + memberError.message, 'error')
-            setLoading(false)
-            return
-          }
-
-          const defaultCategories = [
-            { family_id: familyData.id, name: 'Casa', icon: '🏠', color: '#4CAF50', is_default: true },
-            { family_id: familyData.id, name: 'Trabalho', icon: '💼', color: '#2196F3', is_default: true },
-            { family_id: familyData.id, name: 'Escola', icon: '📚', color: '#FF9800', is_default: true },
-            { family_id: familyData.id, name: 'Saúde', icon: '💊', color: '#E91E63', is_default: true },
-            { family_id: familyData.id, name: 'Compras', icon: '🛒', color: '#9C27B0', is_default: true },
-            { family_id: familyData.id, name: 'Lazer', icon: '🎮', color: '#00BCD4', is_default: true }
-          ]
-          await supabase.from('categories').insert(defaultCategories)
-
-          showToast('Família criada com sucesso!', 'success')
-        }
-
-        onSuccess()
-      }
-    } catch (error: any) {
-      showToast('Erro: ' + error.message, 'error')
-    }
-
-    setLoading(false)
-  }
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="w-20 h-20 mx-auto mb-4 rounded-3xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center shadow-2xl">
-            <Home className="w-10 h-10 text-white" />
-          </div>
-          <h1 className="text-3xl font-bold text-white">FamíliaTask</h1>
-          <p className="text-white/60 mt-2">Organize sua família</p>
-        </div>
-
-        <div className="flex mb-6 bg-white/10 rounded-xl p-1">
-          <button onClick={() => setMode('login')} className={`flex-1 py-2 rounded-lg text-sm font-medium ${mode === 'login' ? 'bg-violet-500 text-white' : 'text-white/60'}`}>Entrar</button>
-          <button onClick={() => setMode('register')} className={`flex-1 py-2 rounded-lg text-sm font-medium ${mode === 'register' ? 'bg-violet-500 text-white' : 'text-white/60'}`}>Criar Conta</button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm text-white/60 mb-1">Email</label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white" placeholder="seu@email.com" required />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm text-white/60 mb-1">Senha</label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white" placeholder="••••••••" required minLength={6} />
-            </div>
-          </div>
-
-          {mode === 'register' && (
-            <>
-              <div>
-                <label className="block text-sm text-white/60 mb-1">Seu Nome</label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
-                  <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white" placeholder="Ex: Papai, Mamãe, João" required />
-                </div>
-              </div>
-
-              <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-4">
-                <p className="text-sm text-white/80 font-medium">Tem código de convite?</p>
-                <div>
-                  <input 
-                    type="text" 
-                    value={inviteCode} 
-                    onChange={(e) => setInviteCode(e.target.value.toUpperCase())} 
-                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white font-mono text-center text-xl tracking-widest" 
-                    placeholder="CÓDIGO" 
-                    maxLength={8} 
-                  />
-                  <p className="text-xs text-white/40 mt-1 text-center">Deixe vazio para criar nova família</p>
-                </div>
-
-                {!inviteCode && (
-                  <div>
-                    <label className="block text-sm text-white/60 mb-1">Nome da Nova Família</label>
-                    <div className="relative">
-                      <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
-                      <input type="text" value={familyName} onChange={(e) => setFamilyName(e.target.value)} className="w-full pl-10 pr-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white" placeholder="Ex: Família Silva" />
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          <button type="submit" disabled={loading} className="w-full py-3 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 font-semibold disabled:opacity-50">
-            {loading ? 'Aguarde...' : mode === 'login' ? 'Entrar' : inviteCode ? 'Entrar na Família' : 'Criar Família'}
-          </button>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-// ==================== TASK MODAL (ATUALIZADO COM AGENDA) ====================
-function TaskModal({ task, categories, members, isAdmin, currentMemberId, onSave, onDelete, onClose }: any) {
-  const existingAssignments = task?.task_assignments?.map((a: any) => a.member_id) || []
-  
-  const [form, setForm] = useState({
-    title: task?.title || '',
-    category_id: task?.category_id || categories[0]?.id || '',
-    is_for_everyone: task?.is_for_everyone ?? true,
-    due_date: task?.due_date || new Date().toISOString().split('T')[0],
-    due_time: task?.due_time?.substring(0, 5) || '',
-    priority: task?.priority || 'medium',
-    has_reminder: task?.has_reminder || false,
-    status: task?.status || 'pending',
-    recurrence_type: task?.recurrence_type || '',
-    recurrence_days: task?.recurrence_days || [],
-    recurrence_day_of_month: task?.recurrence_day_of_month || 1
-  })
-  
-  const [selectedMembers, setSelectedMembers] = useState<string[]>(existingAssignments)
-  const [previewDates, setPreviewDates] = useState<Date[]>([])
-
-  // Atualizar preview quando muda recorrência
-  useEffect(() => {
-    if (form.recurrence_type && form.recurrence_type !== '') {
-      const startDate = new Date(form.due_date || new Date())
-      const dates = generateRecurringDatesPreview(form.recurrence_type, form.recurrence_days, form.recurrence_day_of_month, startDate)
-      setPreviewDates(dates)
-    } else {
-      setPreviewDates([])
-    }
-  }, [form.recurrence_type, form.recurrence_days, form.recurrence_day_of_month, form.due_date])
-
-  const generateRecurringDatesPreview = (recurrenceType: string, recurrenceDays: number[], recurrenceDayOfMonth: number, startDate: Date): Date[] => {
-    const dates: Date[] = []
-    const endDate = new Date(startDate)
-    endDate.setDate(endDate.getDate() + 28)
-
-    if (recurrenceType === 'weekly' && recurrenceDays && recurrenceDays.length > 0) {
-      const current = new Date(startDate)
-      while (current <= endDate) {
-        if (recurrenceDays.includes(current.getDay())) {
-          dates.push(new Date(current))
-        }
-        current.setDate(current.getDate() + 1)
-      }
-    } else if (recurrenceType === 'monthly' && recurrenceDayOfMonth) {
-      for (let i = 0; i < 2; i++) {
-        const monthDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, recurrenceDayOfMonth)
-        if (monthDate >= startDate && monthDate <= endDate) {
-          dates.push(monthDate)
-        }
-      }
-    } else if (recurrenceType === 'yearly') {
-      dates.push(new Date(startDate))
-    }
-
-    return dates
-  }
-
-  const toggleDay = (day: number) => {
-    if (form.recurrence_days.includes(day)) {
-      setForm({ ...form, recurrence_days: form.recurrence_days.filter((d: number) => d !== day) })
-    } else {
-      setForm({ ...form, recurrence_days: [...form.recurrence_days, day] })
-    }
-  }
-
-  const toggleMember = (memberId: string) => {
-    if (selectedMembers.includes(memberId)) {
-      setSelectedMembers(selectedMembers.filter(id => id !== memberId))
-    } else {
-      setSelectedMembers([...selectedMembers, memberId])
-    }
-  }
-
-  const handleSubmit = () => {
-    if (!form.title.trim()) return
-    
-    const isRecurring = form.recurrence_type && form.recurrence_type !== '' && !task
-    
-    const taskData = {
-      title: form.title,
-      category_id: form.category_id,
-      is_for_everyone: form.is_for_everyone,
-      due_date: form.due_date || null,
-      due_time: form.due_time || null,
-      priority: form.priority,
-      has_reminder: form.has_reminder,
-      status: form.status,
-      recurrence_type: form.recurrence_type || null,
-      recurrence_days: form.recurrence_type === 'weekly' ? form.recurrence_days : null,
-      recurrence_day_of_month: form.recurrence_type === 'monthly' ? form.recurrence_day_of_month : null
-    }
-    
-    onSave(taskData, selectedMembers, isRecurring, previewDates)
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-slate-800 border border-white/10">
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-bold">{task ? 'Editar' : 'Nova'} Tarefa</h3>
-            <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-white/10"><X className="w-6 h-6" /></button>
-          </div>
-          
-          <div className="space-y-4">
-            {/* Título */}
-            <div>
-              <label className="block text-sm font-medium mb-2">Título *</label>
-              <input type="text" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none" placeholder="Ex: Colocar lixo pra fora" required />
-            </div>
-
-            {/* Status (só na edição) */}
-            {task && (
-              <div>
-                <label className="block text-sm font-medium mb-2">Status</label>
-                <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none">
-                  <option value="pending">⏳ Pendente</option>
-                  <option value="in_progress">🔄 Em Andamento</option>
-                  <option value="completed">✅ Concluída</option>
-                </select>
-              </div>
-            )}
-
-            {/* Categoria */}
-            {categories.length > 0 && (
-              <div>
-                <label className="block text-sm font-medium mb-2">Categoria</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {categories.map((cat: Category) => (
-                    <button key={cat.id} type="button" onClick={() => setForm({ ...form, category_id: cat.id })} className={`p-3 rounded-xl border ${form.category_id === cat.id ? 'border-violet-500 bg-violet-500/20' : 'border-white/20'}`}>
-                      <span className="text-xl">{cat.icon}</span>
-                      <span className="block text-xs mt-1">{cat.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Atribuição */}
-            <div>
-              <label className="block text-sm font-medium mb-2">Quem faz?</label>
-              <label className="flex items-center gap-3 p-3 rounded-xl border border-white/20 cursor-pointer mb-2">
-                <input type="checkbox" checked={form.is_for_everyone} onChange={(e) => setForm({ ...form, is_for_everyone: e.target.checked })} className="w-5 h-5 rounded accent-violet-500" />
-                <span className="text-xl">👨‍👩‍👧‍👦</span>
-                <span>Toda a família</span>
-              </label>
-              
-              {!form.is_for_everyone && (
-                <div className="grid grid-cols-2 gap-2">
-                  {members.map((member: FamilyMember) => (
-                    <button
-                      key={member.id}
-                      type="button"
-                      onClick={() => toggleMember(member.id)}
-                      className={`p-3 rounded-xl border flex items-center gap-2 ${selectedMembers.includes(member.id) ? 'border-violet-500 bg-violet-500/20' : 'border-white/20'}`}
-                    >
-                      <span className="text-xl">{member.avatar}</span>
-                      <span className="text-sm">{member.name}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Data e Hora */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium mb-2">Data</label>
-                <input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Horário</label>
-                <input type="time" value={form.due_time} onChange={(e) => setForm({ ...form, due_time: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none" />
-              </div>
-            </div>
-
-            {/* Recorrência (só para novas tarefas) */}
-            {!task && (
-              <div>
-                <label className="block text-sm font-medium mb-2">Repetir</label>
-                <select value={form.recurrence_type} onChange={(e) => setForm({ ...form, recurrence_type: e.target.value, recurrence_days: [] })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none">
-                  <option value="">Não repetir</option>
-                  <option value="weekly">Semanal</option>
-                  <option value="monthly">Mensal</option>
-                  <option value="yearly">Anual</option>
-                </select>
-
-                {form.recurrence_type === 'weekly' && (
-                  <div className="mt-3">
-                    <p className="text-xs text-white/60 mb-2">Selecione os dias:</p>
-                    <div className="flex gap-1">
-                      {WEEKDAYS.map(day => (
-                        <button
-                          key={day.value}
-                          type="button"
-                          onClick={() => toggleDay(day.value)}
-                          className={`flex-1 py-2 rounded-lg text-sm font-medium ${form.recurrence_days.includes(day.value) ? 'bg-violet-500 text-white' : 'bg-white/10 text-white/60'}`}
-                        >
-                          {day.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {form.recurrence_type === 'monthly' && (
-                  <div className="mt-3">
-                    <label className="block text-sm text-white/60 mb-1">Dia do mês</label>
-                    <input 
-                      type="number" 
-                      min="1" 
-                      max="31" 
-                      value={form.recurrence_day_of_month} 
-                      onChange={(e) => setForm({ ...form, recurrence_day_of_month: parseInt(e.target.value) })} 
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none"
-                    />
-                  </div>
-                )}
-
-                {/* Preview das datas */}
-                {previewDates.length > 0 && (
-                  <div className="mt-3 p-3 rounded-xl bg-violet-500/10 border border-violet-500/30">
-                    <p className="text-xs text-violet-300 mb-2 flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      Serão criadas {previewDates.length} tarefas:
-                    </p>
-                    <div className="flex flex-wrap gap-1">
-                      {previewDates.slice(0, 8).map((date, i) => (
-                        <span key={i} className="px-2 py-1 rounded bg-violet-500/20 text-xs">
-                          {date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                        </span>
-                      ))}
-                      {previewDates.length > 8 && (
-                        <span className="px-2 py-1 rounded bg-violet-500/20 text-xs">
-                          +{previewDates.length - 8} mais
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Prioridade */}
-            <div>
-              <label className="block text-sm font-medium mb-2">Prioridade</label>
-              <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none">
-                <option value="low">🟢 Baixa</option>
-                <option value="medium">🟡 Média</option>
-                <option value="high">🔴 Alta</option>
-              </select>
-            </div>
-
-            {/* Lembrete */}
-            <label className="flex items-center gap-3 p-3 rounded-xl border border-white/20 cursor-pointer">
-              <input type="checkbox" checked={form.has_reminder} onChange={(e) => setForm({ ...form, has_reminder: e.target.checked })} className="w-5 h-5 rounded accent-violet-500" />
-              <Bell className="w-5 h-5 text-amber-400" />
-              <span>Ativar lembrete</span>
-            </label>
-          </div>
-
-          {/* Botões */}
-          <div className="flex gap-3 mt-6">
-            {onDelete && <button type="button" onClick={onDelete} className="px-4 py-3 rounded-xl bg-red-500/20 text-red-400"><Trash2 className="w-5 h-5" /></button>}
-            <button type="button" onClick={onClose} className="flex-1 py-3 rounded-xl bg-white/10 font-medium">Cancelar</button>
-            <button type="button" onClick={handleSubmit} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 font-medium">
-              {previewDates.length > 1 ? `Criar ${previewDates.length} Tarefas` : 'Salvar'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ==================== SETTINGS TAB ====================
-const AVATAR_OPTIONS = ['👨', '👩', '👴', '👵', '👦', '👧', '🧔', '👱‍♀️', '👨‍🦰', '👩‍🦰', '👨‍🦱', '👩‍🦱', '🧑', '👤']
-const COLOR_OPTIONS = ['#667EEA', '#4CAF50', '#FF9800', '#E91E63', '#9C27B0', '#00BCD4', '#F44336', '#3F51B5']
-
-function SettingsTab({ user, currentMember, onLogout, onUpdate }: any) {
-  const [editing, setEditing] = useState(false)
-  const [name, setName] = useState(currentMember?.name || '')
-  const [avatar, setAvatar] = useState(currentMember?.avatar || '👤')
-  const [color, setColor] = useState(currentMember?.color || '#667EEA')
-
-  const handleSave = () => {
-    onUpdate({ name, avatar, color })
-    setEditing(false)
-  }
-
-  return (
-    <div className="py-4 space-y-4">
-      <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-medium">Meu Perfil</h3>
-          {!editing && (
-            <button onClick={() => setEditing(true)} className="px-3 py-1 rounded-lg bg-violet-500/20 text-violet-300 text-sm flex items-center gap-1">
-              <Edit3 className="w-4 h-4" /> Editar
-            </button>
-          )}
-        </div>
-
-        {editing ? (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm text-white/60 mb-2">Seu Nome</label>
-              <input 
-                type="text" 
-                value={name} 
-                onChange={(e) => setName(e.target.value)} 
-                className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white"
-                placeholder="Seu nome"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm text-white/60 mb-2">Avatar</label>
-              <div className="flex flex-wrap gap-2">
-                {AVATAR_OPTIONS.map(a => (
-                  <button 
-                    key={a} 
-                    onClick={() => setAvatar(a)}
-                    className={`w-10 h-10 rounded-lg text-xl flex items-center justify-center ${avatar === a ? 'bg-violet-500 ring-2 ring-violet-300' : 'bg-white/10'}`}
-                  >
-                    {a}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm text-white/60 mb-2">Cor</label>
-              <div className="flex flex-wrap gap-2">
-                {COLOR_OPTIONS.map(c => (
-                  <button 
-                    key={c} 
-                    onClick={() => setColor(c)}
-                    className={`w-10 h-10 rounded-lg ${color === c ? 'ring-2 ring-white' : ''}`}
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-2 mt-4">
-              <button onClick={() => setEditing(false)} className="flex-1 py-3 rounded-xl bg-white/10 font-medium">Cancelar</button>
-              <button onClick={handleSave} className="flex-1 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 font-medium">Salvar</button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl" style={{ backgroundColor: currentMember?.color }}>
-                {currentMember?.avatar}
-              </div>
-              <div>
-                <p className="font-medium">{currentMember?.name}</p>
-                <p className="text-sm text-white/60">{user?.email}</p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
-        <h3 className="font-medium mb-4">Conta</h3>
-        <button onClick={onLogout} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-red-500/20 text-red-400">
-          <LogOut className="w-5 h-5" /><span>Sair da conta</span>
-        </button>
-      </div>
     </div>
   )
 }
