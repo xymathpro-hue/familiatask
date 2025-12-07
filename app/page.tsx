@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { 
   Home, Users, Settings, Plus, Check, Calendar, Star,
-  Bell, Trash2, Edit3, Copy, Eye, Clock,
+  Bell, Trash2, Edit3, Copy, Eye, Clock, ClipboardList,
   ShieldCheck, Crown, BarChart3, Download, ChevronLeft, ChevronRight,
   LogOut, Share2, AlertCircle, CheckCircle, X, Mail, Lock, User, Repeat, Filter,
   FileText, TrendingUp, Award, Target, Percent, ArrowUp, ArrowDown,
@@ -86,6 +86,17 @@ export default function FamiliaTaskApp() {
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null)
   const [taskFilter, setTaskFilter] = useState<'all' | 'today' | 'week'>('today')
+
+  // Estados do formulário de tarefa
+  const [taskTitle, setTaskTitle] = useState('')
+  const [taskDescription, setTaskDescription] = useState('')
+  const [taskCategoryId, setTaskCategoryId] = useState('')
+  const [taskDueDate, setTaskDueDate] = useState('')
+  const [taskDueTime, setTaskDueTime] = useState('')
+  const [taskPriority, setTaskPriority] = useState<'low' | 'medium' | 'high'>('medium')
+  const [taskAssignees, setTaskAssignees] = useState<string[]>([])
+  const [taskRecurrence, setTaskRecurrence] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none')
+  const [savingTask, setSavingTask] = useState(false)
   
   // Estado do Relatório
   const [reportMonth, setReportMonth] = useState(new Date().getMonth())
@@ -291,6 +302,131 @@ export default function FamiliaTaskApp() {
   const showNotification = (type: 'success' | 'error', message: string) => {
     setNotification({ type, message })
     setTimeout(() => setNotification(null), 3000)
+  }
+
+  // ============================================
+  // FUNÇÕES DO MODAL DE TAREFA
+  // ============================================
+
+  const resetTaskForm = () => {
+    setTaskTitle('')
+    setTaskDescription('')
+    setTaskCategoryId(categories[0]?.id || '')
+    setTaskDueDate(new Date().toISOString().split('T')[0])
+    setTaskDueTime('')
+    setTaskPriority('medium')
+    setTaskAssignees([])
+    setTaskRecurrence('none')
+  }
+
+  const openTaskModal = (task?: Task | null) => {
+    if (task) {
+      setEditingTask(task)
+      setTaskTitle(task.title)
+      setTaskDescription(task.description || '')
+      setTaskCategoryId(task.category_id || '')
+      setTaskDueDate(task.due_date || '')
+      setTaskDueTime(task.due_time || '')
+      setTaskPriority(task.priority)
+      setTaskRecurrence((task.recurrence as any) || 'none')
+      // Carregar assignees
+      const taskAssigns = assignments.filter(a => a.task_id === task.id).map(a => a.member_id)
+      setTaskAssignees(taskAssigns)
+    } else {
+      setEditingTask(null)
+      resetTaskForm()
+    }
+    setShowTaskModal(true)
+  }
+
+  const closeTaskModal = () => {
+    setShowTaskModal(false)
+    setEditingTask(null)
+    resetTaskForm()
+  }
+
+  const handleSaveTask = async () => {
+    if (!taskTitle.trim() || !family || !currentMember) return
+
+    setSavingTask(true)
+
+    try {
+      if (editingTask) {
+        // Atualizar tarefa existente
+        await supabase
+          .from('tasks')
+          .update({
+            title: taskTitle.trim(),
+            description: taskDescription.trim() || null,
+            category_id: taskCategoryId || null,
+            due_date: taskDueDate || null,
+            due_time: taskDueTime || null,
+            priority: taskPriority,
+            recurrence: taskRecurrence,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', editingTask.id)
+
+        // Atualizar assignments
+        await supabase.from('task_assignments').delete().eq('task_id', editingTask.id)
+        
+        if (taskAssignees.length > 0) {
+          const assignmentInserts = taskAssignees.map(memberId => ({
+            task_id: editingTask.id,
+            member_id: memberId,
+            family_id: family.id
+          }))
+          await supabase.from('task_assignments').insert(assignmentInserts)
+        }
+
+        showNotification('success', 'Tarefa atualizada!')
+      } else {
+        // Criar nova tarefa
+        const { data: newTask } = await supabase
+          .from('tasks')
+          .insert({
+            family_id: family.id,
+            title: taskTitle.trim(),
+            description: taskDescription.trim() || null,
+            category_id: taskCategoryId || null,
+            due_date: taskDueDate || null,
+            due_time: taskDueTime || null,
+            priority: taskPriority,
+            recurrence: taskRecurrence,
+            status: 'pending',
+            created_by: currentMember.id
+          })
+          .select()
+          .single()
+
+        if (newTask && taskAssignees.length > 0) {
+          const assignmentInserts = taskAssignees.map(memberId => ({
+            task_id: newTask.id,
+            member_id: memberId,
+            family_id: family.id
+          }))
+          await supabase.from('task_assignments').insert(assignmentInserts)
+        }
+
+        showNotification('success', 'Tarefa criada!')
+      }
+
+      closeTaskModal()
+      loadUserData()
+    } catch (error) {
+      console.error('Erro ao salvar tarefa:', error)
+      showNotification('error', 'Erro ao salvar tarefa')
+    } finally {
+      setSavingTask(false)
+    }
+  }
+
+  const toggleAssignee = (memberId: string) => {
+    setTaskAssignees(prev => 
+      prev.includes(memberId) 
+        ? prev.filter(id => id !== memberId)
+        : [...prev, memberId]
+    )
   }
 
   // ============================================
@@ -704,6 +840,171 @@ export default function FamiliaTaskApp() {
         </div>
       )}
 
+      {/* Modal de Tarefa */}
+      {showTaskModal && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-lg bg-slate-900 rounded-t-3xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-slate-900 px-4 py-4 border-b border-white/10 flex items-center justify-between">
+              <h2 className="text-lg font-bold">{editingTask ? 'Editar Tarefa' : 'Nova Tarefa'}</h2>
+              <button onClick={closeTaskModal} className="p-2 rounded-xl hover:bg-white/10">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {/* Título */}
+              <div>
+                <label className="block text-sm text-white/60 mb-2">Título *</label>
+                <input
+                  type="text"
+                  value={taskTitle}
+                  onChange={(e) => setTaskTitle(e.target.value)}
+                  placeholder="Nome da tarefa"
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white"
+                />
+              </div>
+
+              {/* Descrição */}
+              <div>
+                <label className="block text-sm text-white/60 mb-2">Descrição</label>
+                <textarea
+                  value={taskDescription}
+                  onChange={(e) => setTaskDescription(e.target.value)}
+                  placeholder="Detalhes da tarefa (opcional)"
+                  rows={2}
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white resize-none"
+                />
+              </div>
+
+              {/* Categoria */}
+              <div>
+                <label className="block text-sm text-white/60 mb-2">Categoria</label>
+                <div className="flex flex-wrap gap-2">
+                  {categories.map(cat => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setTaskCategoryId(cat.id)}
+                      className={`px-3 py-2 rounded-xl text-sm flex items-center gap-2 transition-all ${
+                        taskCategoryId === cat.id ? 'bg-violet-500' : 'bg-white/10 hover:bg-white/20'
+                      }`}
+                    >
+                      <span>{cat.icon}</span>
+                      <span>{cat.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Data e Hora */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-white/60 mb-2">Data</label>
+                  <input
+                    type="date"
+                    value={taskDueDate}
+                    onChange={(e) => setTaskDueDate(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-white/60 mb-2">Hora</label>
+                  <input
+                    type="time"
+                    value={taskDueTime}
+                    onChange={(e) => setTaskDueTime(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 focus:border-violet-500 focus:outline-none text-white"
+                  />
+                </div>
+              </div>
+
+              {/* Prioridade */}
+              <div>
+                <label className="block text-sm text-white/60 mb-2">Prioridade</label>
+                <div className="flex gap-2">
+                  {(['low', 'medium', 'high'] as const).map(p => (
+                    <button
+                      key={p}
+                      onClick={() => setTaskPriority(p)}
+                      className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${
+                        taskPriority === p ? 'ring-2 ring-white' : ''
+                      }`}
+                      style={{ 
+                        backgroundColor: PRIORITY_CONFIG[p].color + '30',
+                        color: PRIORITY_CONFIG[p].color 
+                      }}
+                    >
+                      {PRIORITY_CONFIG[p].label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Repetição */}
+              <div>
+                <label className="block text-sm text-white/60 mb-2">Repetição</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'none', label: 'Não repetir' },
+                    { id: 'daily', label: 'Diária' },
+                    { id: 'weekly', label: 'Semanal' },
+                    { id: 'monthly', label: 'Mensal' }
+                  ].map(r => (
+                    <button
+                      key={r.id}
+                      onClick={() => setTaskRecurrence(r.id as any)}
+                      className={`px-3 py-2 rounded-xl text-sm transition-all ${
+                        taskRecurrence === r.id ? 'bg-violet-500' : 'bg-white/10 hover:bg-white/20'
+                      }`}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Responsáveis */}
+              <div>
+                <label className="block text-sm text-white/60 mb-2">Responsáveis</label>
+                <div className="flex flex-wrap gap-2">
+                  {members.map(member => (
+                    <button
+                      key={member.id}
+                      onClick={() => toggleAssignee(member.id)}
+                      className={`px-3 py-2 rounded-xl text-sm flex items-center gap-2 transition-all ${
+                        taskAssignees.includes(member.id) ? 'ring-2 ring-violet-500 bg-violet-500/20' : 'bg-white/10 hover:bg-white/20'
+                      }`}
+                    >
+                      <span className="w-6 h-6 rounded-lg flex items-center justify-center text-sm" style={{ backgroundColor: member.color }}>
+                        {member.avatar}
+                      </span>
+                      <span>{member.name}</span>
+                      {taskAssignees.includes(member.id) && <Check className="w-4 h-4 text-violet-400" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Botões */}
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={closeTaskModal}
+                  className="flex-1 py-3 rounded-xl bg-white/10 font-medium hover:bg-white/20"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSaveTask}
+                  disabled={!taskTitle.trim() || savingTask}
+                  className="flex-1 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 font-medium hover:opacity-90 disabled:opacity-50"
+                >
+                  {savingTask ? 'Salvando...' : editingTask ? 'Atualizar' : 'Criar Tarefa'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-lg border-b border-white/10">
         <div className="px-4 py-3">
@@ -719,7 +1020,7 @@ export default function FamiliaTaskApp() {
             </div>
             {activeTab === 'tasks' && (
               <button 
-                onClick={() => { setEditingTask(null); setShowTaskModal(true) }} 
+                onClick={() => openTaskModal(null)} 
                 className="w-10 h-10 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 flex items-center justify-center"
               >
                 <Plus className="w-5 h-5" />
@@ -791,9 +1092,14 @@ export default function FamiliaTaskApp() {
                             </p>
                           )}
                         </div>
-                        <button onClick={() => deleteTask(task.id)} className="p-2 rounded-lg hover:bg-red-500/20">
-                          <Trash2 className="w-4 h-4 text-red-400/50" />
-                        </button>
+                        <div className="flex gap-1">
+                          <button onClick={() => openTaskModal(task)} className="p-2 rounded-lg hover:bg-white/10">
+                            <Edit3 className="w-4 h-4 text-white/50" />
+                          </button>
+                          <button onClick={() => deleteTask(task.id)} className="p-2 rounded-lg hover:bg-red-500/20">
+                            <Trash2 className="w-4 h-4 text-red-400/50" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )
@@ -1426,7 +1732,7 @@ export default function FamiliaTaskApp() {
       <nav className="fixed bottom-0 left-0 right-0 bg-slate-900/90 backdrop-blur-lg border-t border-white/10">
         <div className="flex justify-around py-2">
           {[
-            { id: 'tasks', icon: Home, label: 'Início', badge: tasks.filter(t => getTaskStatus(t) === 'overdue').length },
+            { id: 'tasks', icon: ClipboardList, label: 'Tarefas', badge: tasks.filter(t => getTaskStatus(t) === 'overdue').length },
             { id: 'calendar', icon: Calendar, label: 'Calendário' },
             { id: 'shopping', icon: ShoppingCart, label: 'Compras', badge: shoppingStats.pending },
             { id: 'report', icon: BarChart3, label: 'Relatório' },
