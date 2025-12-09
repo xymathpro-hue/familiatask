@@ -97,6 +97,7 @@ export default function FamiliaTaskApp() {
   const [taskAssignees, setTaskAssignees] = useState<string[]>([])
   const [taskRecurrence, setTaskRecurrence] = useState<'none' | 'daily' | 'weekly' | 'monthly'>('none')
   const [taskTimes, setTaskTimes] = useState<string[]>(['']) // Múltiplos horários
+  const [taskWeekDays, setTaskWeekDays] = useState<number[]>([]) // 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
   const [savingTask, setSavingTask] = useState(false)
   
   // Estado do Relatório
@@ -319,6 +320,7 @@ export default function FamiliaTaskApp() {
     setTaskAssignees([])
     setTaskRecurrence('none')
     setTaskTimes([''])
+    setTaskWeekDays([])
   }
 
   const openTaskModal = (task?: Task | null) => {
@@ -332,6 +334,7 @@ export default function FamiliaTaskApp() {
       setTaskPriority(task.priority)
       setTaskRecurrence((task.recurrence as any) || 'none')
       setTaskTimes(task.due_time ? [task.due_time] : [''])
+      setTaskWeekDays([]) // Não temos campo no banco para isso ainda
       // Carregar assignees
       const taskAssigns = assignments.filter(a => a.task_id === task.id).map(a => a.member_id)
       setTaskAssignees(taskAssigns)
@@ -361,10 +364,52 @@ export default function FamiliaTaskApp() {
     setTaskTimes(prev => prev.map((t, i) => i === index ? value : t))
   }
 
+  // Toggle dia da semana
+  const toggleWeekDay = (day: number) => {
+    setTaskWeekDays(prev => 
+      prev.includes(day) 
+        ? prev.filter(d => d !== day)
+        : [...prev, day].sort((a, b) => a - b)
+    )
+  }
+
   // Gerar datas futuras baseado na recorrência
-  const generateRecurringDates = (startDate: string, recurrence: string, count: number = 30): string[] => {
-    const dates: string[] = [startDate]
-    const start = new Date(startDate + 'T00:00:00')
+  const generateRecurringDates = (startDate: string, recurrence: string, weekDays: number[] = [], count: number = 30): string[] => {
+    const dates: string[] = []
+    const start = new Date(startDate + 'T12:00:00') // Usar meio-dia para evitar problemas de timezone
+    
+    if (recurrence === 'weekly' && weekDays.length > 0) {
+      // Gerar datas para os dias específicos da semana
+      // Percorrer as próximas X semanas
+      const weeksToGenerate = Math.ceil(count / weekDays.length)
+      
+      for (let week = 0; week < weeksToGenerate; week++) {
+        for (const dayOfWeek of weekDays) {
+          const newDate = new Date(start)
+          // Encontrar o dia da semana correto
+          const currentDayOfWeek = start.getDay()
+          let daysToAdd = dayOfWeek - currentDayOfWeek
+          if (daysToAdd < 0) daysToAdd += 7
+          daysToAdd += (week * 7)
+          
+          newDate.setDate(start.getDate() + daysToAdd)
+          
+          // Só adicionar se for >= data inicial
+          if (newDate >= start) {
+            const dateStr = `${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}-${String(newDate.getDate()).padStart(2, '0')}`
+            if (!dates.includes(dateStr)) {
+              dates.push(dateStr)
+            }
+          }
+        }
+      }
+      
+      // Ordenar e limitar
+      return dates.sort().slice(0, count)
+    }
+    
+    // Comportamento original para daily e monthly
+    dates.push(startDate)
     
     for (let i = 1; i < count; i++) {
       const newDate = new Date(start)
@@ -377,7 +422,8 @@ export default function FamiliaTaskApp() {
         newDate.setMonth(start.getMonth() + i)
       }
       
-      dates.push(newDate.toISOString().split('T')[0])
+      const dateStr = `${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}-${String(newDate.getDate()).padStart(2, '0')}`
+      dates.push(dateStr)
     }
     
     return dates
@@ -428,9 +474,12 @@ export default function FamiliaTaskApp() {
         if (taskDueDate) {
           if (taskRecurrence === 'none') {
             dates = [taskDueDate]
+          } else if (taskRecurrence === 'weekly' && taskWeekDays.length > 0) {
+            // Semanal com dias específicos
+            dates = generateRecurringDates(taskDueDate, taskRecurrence, taskWeekDays, 30)
           } else {
-            // Gerar próximos 30 dias/semanas/meses
-            dates = generateRecurringDates(taskDueDate, taskRecurrence, 30)
+            // Diário, semanal simples ou mensal
+            dates = generateRecurringDates(taskDueDate, taskRecurrence, [], 30)
           }
         } else {
           dates = ['']
@@ -1063,7 +1112,10 @@ export default function FamiliaTaskApp() {
                   ].map(r => (
                     <button
                       key={r.id}
-                      onClick={() => setTaskRecurrence(r.id as any)}
+                      onClick={() => {
+                        setTaskRecurrence(r.id as any)
+                        if (r.id !== 'weekly') setTaskWeekDays([])
+                      }}
                       className={`px-3 py-2 rounded-xl text-sm transition-all ${
                         taskRecurrence === r.id ? 'bg-violet-500' : 'bg-white/10 hover:bg-white/20'
                       }`}
@@ -1072,9 +1124,55 @@ export default function FamiliaTaskApp() {
                     </button>
                   ))}
                 </div>
-                {taskRecurrence !== 'none' && (
+
+                {/* Seleção de dias da semana */}
+                {taskRecurrence === 'weekly' && (
+                  <div className="mt-3 p-3 rounded-xl bg-white/5 border border-white/10">
+                    <p className="text-xs text-white/60 mb-2">Quais dias da semana?</p>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: 0, label: 'Dom', short: 'D' },
+                        { id: 1, label: 'Seg', short: 'S' },
+                        { id: 2, label: 'Ter', short: 'T' },
+                        { id: 3, label: 'Qua', short: 'Q' },
+                        { id: 4, label: 'Qui', short: 'Q' },
+                        { id: 5, label: 'Sex', short: 'S' },
+                        { id: 6, label: 'Sáb', short: 'S' }
+                      ].map(day => (
+                        <button
+                          key={day.id}
+                          onClick={() => toggleWeekDay(day.id)}
+                          className={`w-10 h-10 rounded-xl text-sm font-medium transition-all ${
+                            taskWeekDays.includes(day.id) 
+                              ? 'bg-violet-500 text-white' 
+                              : 'bg-white/10 text-white/60 hover:bg-white/20'
+                          }`}
+                        >
+                          {day.label}
+                        </button>
+                      ))}
+                    </div>
+                    {taskWeekDays.length === 0 && (
+                      <p className="text-xs text-amber-400/80 mt-2">
+                        ⚠️ Selecione pelo menos um dia
+                      </p>
+                    )}
+                    {taskWeekDays.length > 0 && (
+                      <p className="text-xs text-green-400/80 mt-2">
+                        ✅ {taskWeekDays.length} dia{taskWeekDays.length > 1 ? 's' : ''} selecionado{taskWeekDays.length > 1 ? 's' : ''} por semana
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {taskRecurrence !== 'none' && taskRecurrence !== 'weekly' && (
                   <p className="text-xs text-amber-400/80 mt-2">
-                    ⚡ Serão criadas 30 tarefas {taskRecurrence === 'daily' ? 'para os próximos 30 dias' : taskRecurrence === 'weekly' ? 'para as próximas 30 semanas' : 'para os próximos 30 meses'}
+                    ⚡ Serão criadas 30 tarefas {taskRecurrence === 'daily' ? 'para os próximos 30 dias' : 'para os próximos 30 meses'}
+                  </p>
+                )}
+                {taskRecurrence === 'weekly' && taskWeekDays.length > 0 && (
+                  <p className="text-xs text-amber-400/80 mt-2">
+                    ⚡ Serão criadas ~{Math.min(30, taskWeekDays.length * 5)} tarefas para as próximas semanas
                   </p>
                 )}
               </div>
@@ -1111,7 +1209,7 @@ export default function FamiliaTaskApp() {
                 </button>
                 <button
                   onClick={handleSaveTask}
-                  disabled={!taskTitle.trim() || savingTask}
+                  disabled={!taskTitle.trim() || savingTask || (taskRecurrence === 'weekly' && taskWeekDays.length === 0)}
                   className="flex-1 py-3 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 font-medium hover:opacity-90 disabled:opacity-50"
                 >
                   {savingTask ? 'Salvando...' : editingTask ? 'Atualizar' : 'Criar Tarefa'}
