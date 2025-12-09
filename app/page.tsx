@@ -376,53 +376,95 @@ export default function FamiliaTaskApp() {
   // Gerar datas futuras baseado na recorrência
   const generateRecurringDates = (startDate: string, recurrence: string, weekDays: number[] = [], count: number = 30): string[] => {
     const dates: string[] = []
-    const start = new Date(startDate + 'T12:00:00') // Usar meio-dia para evitar problemas de timezone
+    
+    // Parsear a data manualmente para evitar problemas de timezone
+    const [year, month, day] = startDate.split('-').map(Number)
     
     if (recurrence === 'weekly' && weekDays.length > 0) {
-      // Gerar datas para os dias específicos da semana
-      // Percorrer as próximas X semanas
-      const weeksToGenerate = Math.ceil(count / weekDays.length)
+      // Calcular o dia da semana da data inicial usando fórmula de Zeller simplificada
+      const getWeekDay = (y: number, m: number, d: number): number => {
+        const date = new Date(y, m - 1, d)
+        return date.getDay() // 0=Dom, 1=Seg, 2=Ter, etc.
+      }
       
-      for (let week = 0; week < weeksToGenerate; week++) {
-        for (const dayOfWeek of weekDays) {
-          const newDate = new Date(start)
-          // Encontrar o dia da semana correto
-          const currentDayOfWeek = start.getDay()
-          let daysToAdd = dayOfWeek - currentDayOfWeek
-          if (daysToAdd < 0) daysToAdd += 7
-          daysToAdd += (week * 7)
-          
-          newDate.setDate(start.getDate() + daysToAdd)
-          
-          // Só adicionar se for >= data inicial
-          if (newDate >= start) {
-            const dateStr = `${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}-${String(newDate.getDate()).padStart(2, '0')}`
-            if (!dates.includes(dateStr)) {
-              dates.push(dateStr)
-            }
+      const startWeekDay = getWeekDay(year, month, day)
+      
+      // Gerar datas para os próximos dias
+      let currentYear = year
+      let currentMonth = month
+      let currentDay = day
+      let addedCount = 0
+      
+      // Percorrer os próximos 120 dias para encontrar os dias corretos
+      for (let i = 0; i < 120 && addedCount < count; i++) {
+        const weekDay = getWeekDay(currentYear, currentMonth, currentDay)
+        
+        if (weekDays.includes(weekDay)) {
+          const dateStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(currentDay).padStart(2, '0')}`
+          dates.push(dateStr)
+          addedCount++
+        }
+        
+        // Avançar para o próximo dia
+        currentDay++
+        const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
+        if (currentDay > daysInMonth) {
+          currentDay = 1
+          currentMonth++
+          if (currentMonth > 12) {
+            currentMonth = 1
+            currentYear++
           }
         }
       }
       
-      // Ordenar e limitar
-      return dates.sort().slice(0, count)
+      return dates
     }
     
     // Comportamento original para daily e monthly
     dates.push(startDate)
     
+    let currentYear = year
+    let currentMonth = month
+    let currentDay = day
+    
     for (let i = 1; i < count; i++) {
-      const newDate = new Date(start)
-      
       if (recurrence === 'daily') {
-        newDate.setDate(start.getDate() + i)
+        currentDay++
+        const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
+        if (currentDay > daysInMonth) {
+          currentDay = 1
+          currentMonth++
+          if (currentMonth > 12) {
+            currentMonth = 1
+            currentYear++
+          }
+        }
       } else if (recurrence === 'weekly') {
-        newDate.setDate(start.getDate() + (i * 7))
+        currentDay += 7
+        const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
+        while (currentDay > daysInMonth) {
+          currentDay -= daysInMonth
+          currentMonth++
+          if (currentMonth > 12) {
+            currentMonth = 1
+            currentYear++
+          }
+        }
       } else if (recurrence === 'monthly') {
-        newDate.setMonth(start.getMonth() + i)
+        currentMonth++
+        if (currentMonth > 12) {
+          currentMonth = 1
+          currentYear++
+        }
+        // Ajustar se o dia não existe no mês (ex: 31 em fevereiro)
+        const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
+        if (currentDay > daysInMonth) {
+          currentDay = daysInMonth
+        }
       }
       
-      const dateStr = `${newDate.getFullYear()}-${String(newDate.getMonth() + 1).padStart(2, '0')}-${String(newDate.getDate()).padStart(2, '0')}`
+      const dateStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(currentDay).padStart(2, '0')}`
       dates.push(dateStr)
     }
     
