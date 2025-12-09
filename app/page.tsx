@@ -373,31 +373,48 @@ export default function FamiliaTaskApp() {
     )
   }
 
+  // Calcular dia da semana usando fórmula de Zeller (sem usar Date)
+  const getDayOfWeek = (year: number, month: number, day: number): number => {
+    // Fórmula de Zeller modificada
+    // Retorna: 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
+    if (month < 3) {
+      month += 12
+      year -= 1
+    }
+    const k = year % 100
+    const j = Math.floor(year / 100)
+    const h = (day + Math.floor((13 * (month + 1)) / 5) + k + Math.floor(k / 4) + Math.floor(j / 4) - 2 * j) % 7
+    // Converter de Zeller (0=Sáb) para JS (0=Dom)
+    return ((h + 6) % 7)
+  }
+
   // Gerar datas futuras baseado na recorrência
   const generateRecurringDates = (startDate: string, recurrence: string, weekDays: number[] = [], count: number = 30): string[] => {
     const dates: string[] = []
     
-    // Parsear a data manualmente para evitar problemas de timezone
+    // Parsear a data manualmente
     const [year, month, day] = startDate.split('-').map(Number)
     
-    if (recurrence === 'weekly' && weekDays.length > 0) {
-      // Calcular o dia da semana da data inicial usando fórmula de Zeller simplificada
-      const getWeekDay = (y: number, m: number, d: number): number => {
-        const date = new Date(y, m - 1, d)
-        return date.getDay() // 0=Dom, 1=Seg, 2=Ter, etc.
+    // Função para obter dias no mês
+    const getDaysInMonth = (y: number, m: number): number => {
+      const daysPerMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+      if (m === 2) {
+        // Ano bissexto
+        const isLeap = (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0)
+        return isLeap ? 29 : 28
       }
-      
-      const startWeekDay = getWeekDay(year, month, day)
-      
-      // Gerar datas para os próximos dias
+      return daysPerMonth[m - 1]
+    }
+    
+    if (recurrence === 'weekly' && weekDays.length > 0) {
       let currentYear = year
       let currentMonth = month
       let currentDay = day
       let addedCount = 0
       
-      // Percorrer os próximos 120 dias para encontrar os dias corretos
+      // Percorrer os próximos 120 dias
       for (let i = 0; i < 120 && addedCount < count; i++) {
-        const weekDay = getWeekDay(currentYear, currentMonth, currentDay)
+        const weekDay = getDayOfWeek(currentYear, currentMonth, currentDay)
         
         if (weekDays.includes(weekDay)) {
           const dateStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(currentDay).padStart(2, '0')}`
@@ -407,7 +424,7 @@ export default function FamiliaTaskApp() {
         
         // Avançar para o próximo dia
         currentDay++
-        const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
+        const daysInMonth = getDaysInMonth(currentYear, currentMonth)
         if (currentDay > daysInMonth) {
           currentDay = 1
           currentMonth++
@@ -431,7 +448,7 @@ export default function FamiliaTaskApp() {
     for (let i = 1; i < count; i++) {
       if (recurrence === 'daily') {
         currentDay++
-        const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
+        const daysInMonth = getDaysInMonth(currentYear, currentMonth)
         if (currentDay > daysInMonth) {
           currentDay = 1
           currentMonth++
@@ -442,7 +459,7 @@ export default function FamiliaTaskApp() {
         }
       } else if (recurrence === 'weekly') {
         currentDay += 7
-        const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
+        let daysInMonth = getDaysInMonth(currentYear, currentMonth)
         while (currentDay > daysInMonth) {
           currentDay -= daysInMonth
           currentMonth++
@@ -450,6 +467,7 @@ export default function FamiliaTaskApp() {
             currentMonth = 1
             currentYear++
           }
+          daysInMonth = getDaysInMonth(currentYear, currentMonth)
         }
       } else if (recurrence === 'monthly') {
         currentMonth++
@@ -457,8 +475,7 @@ export default function FamiliaTaskApp() {
           currentMonth = 1
           currentYear++
         }
-        // Ajustar se o dia não existe no mês (ex: 31 em fevereiro)
-        const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
+        const daysInMonth = getDaysInMonth(currentYear, currentMonth)
         if (currentDay > daysInMonth) {
           currentDay = daysInMonth
         }
