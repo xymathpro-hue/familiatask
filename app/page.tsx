@@ -528,13 +528,16 @@ export default function FamiliaTaskApp() {
       
       if (editingTask) {
         // Atualizar tarefa existente (só atualiza essa, não cria novas)
+        // Adicionar T12:00:00 para evitar problema de timezone
+        const safeDueDate = taskDueDate ? `${taskDueDate}T12:00:00` : null
+        
         await supabase
           .from('tasks')
           .update({
             title: taskTitle.trim(),
             description: taskDescription.trim() || null,
             category_id: taskCategoryId || null,
-            due_date: taskDueDate || null,
+            due_date: safeDueDate,
             due_time: validTimes[0] || null,
             priority: taskPriority,
             recurrence: taskRecurrence,
@@ -566,9 +569,6 @@ export default function FamiliaTaskApp() {
           } else if (taskRecurrence === 'weekly' && taskWeekDays.length > 0) {
             // Semanal com dias específicos
             dates = generateRecurringDates(taskDueDate, taskRecurrence, taskWeekDays, 30)
-            
-            // DEBUG temporário - mostrar o que foi gerado
-            alert('DEBUG:\nData inicial: ' + taskDueDate + '\nDias selecionados: ' + taskWeekDays.join(',') + '\nPrimeiras datas: ' + dates.slice(0, 5).join(', '))
           } else {
             // Diário, semanal simples ou mensal
             dates = generateRecurringDates(taskDueDate, taskRecurrence, [], 30)
@@ -585,6 +585,10 @@ export default function FamiliaTaskApp() {
         // Criar uma tarefa para cada combinação de data + horário
         for (const date of dates) {
           for (const time of timesToUse) {
+            // Adicionar T12:00:00 para evitar problema de timezone
+            // Sem isso, "2025-12-16" vira "2025-12-15" por causa do UTC-3
+            const safeDueDate = date ? `${date}T12:00:00` : null
+            
             const { data: newTask } = await supabase
               .from('tasks')
               .insert({
@@ -592,7 +596,7 @@ export default function FamiliaTaskApp() {
                 title: taskTitle.trim(),
                 description: taskDescription.trim() || null,
                 category_id: taskCategoryId || null,
-                due_date: date || null,
+                due_date: safeDueDate,
                 due_time: time || null,
                 priority: taskPriority,
                 recurrence: taskRecurrence,
