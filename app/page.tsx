@@ -373,31 +373,48 @@ export default function FamiliaTaskApp() {
     )
   }
 
-  // Calcular dia da semana usando APENAS matemática (Fórmula de Zeller)
+  // Calcular dia da semana usando DATA ÂNCORA (mais confiável)
+  // Sabemos que 01/01/2025 é Quarta-feira (3)
   // Retorna: 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
   const getDayOfWeek = (year: number, month: number, day: number): number => {
-    // Ajuste para fórmula de Zeller: janeiro=13, fevereiro=14 do ano anterior
-    let m = month
-    let y = year
-    if (m < 3) {
-      m += 12
-      y -= 1
+    // Data âncora: 01/01/2025 = Quarta-feira (3)
+    const anchorYear = 2025
+    const anchorDayOfWeek = 3 // Quarta
+    
+    // Calcular dias desde 01/01/2025
+    const daysInMonths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    
+    // Verificar ano bissexto
+    const isLeapYear = (y: number) => (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0)
+    
+    let totalDays = 0
+    
+    // Anos completos desde 2025
+    for (let y = anchorYear; y < year; y++) {
+      totalDays += isLeapYear(y) ? 366 : 365
     }
     
-    const q = day
-    const k = y % 100
-    const j = Math.floor(y / 100)
+    // Anos completos antes de 2025 (se necessário)
+    for (let y = year; y < anchorYear; y++) {
+      totalDays -= isLeapYear(y) ? 366 : 365
+    }
     
-    // Fórmula de Zeller
-    let h = (q + Math.floor((13 * (m + 1)) / 5) + k + Math.floor(k / 4) + Math.floor(j / 4) - 2 * j) % 7
+    // Meses completos do ano atual
+    const febDays = isLeapYear(year) ? 29 : 28
+    const monthDays = [31, febDays, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     
-    // Ajustar valores negativos
-    if (h < 0) h += 7
+    for (let m = 1; m < month; m++) {
+      totalDays += monthDays[m - 1]
+    }
     
-    // Zeller retorna: 0=Sáb, 1=Dom, 2=Seg, 3=Ter, 4=Qua, 5=Qui, 6=Sex
-    // Converter para: 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
-    const conversion = [6, 0, 1, 2, 3, 4, 5]
-    return conversion[h]
+    // Dias do mês atual
+    totalDays += day - 1
+    
+    // Calcular dia da semana
+    let dayOfWeek = (anchorDayOfWeek + totalDays) % 7
+    if (dayOfWeek < 0) dayOfWeek += 7
+    
+    return dayOfWeek
   }
 
   // Gerar datas futuras baseado na recorrência
@@ -542,12 +559,16 @@ export default function FamiliaTaskApp() {
         // Criar novas tarefas
         // Gerar datas baseado na recorrência
         let dates: string[] = []
+        
         if (taskDueDate) {
           if (taskRecurrence === 'none') {
             dates = [taskDueDate]
           } else if (taskRecurrence === 'weekly' && taskWeekDays.length > 0) {
             // Semanal com dias específicos
             dates = generateRecurringDates(taskDueDate, taskRecurrence, taskWeekDays, 30)
+            
+            // DEBUG temporário - mostrar o que foi gerado
+            alert('DEBUG:\nData inicial: ' + taskDueDate + '\nDias selecionados: ' + taskWeekDays.join(',') + '\nPrimeiras datas: ' + dates.slice(0, 5).join(', '))
           } else {
             // Diário, semanal simples ou mensal
             dates = generateRecurringDates(taskDueDate, taskRecurrence, [], 30)
@@ -1229,9 +1250,44 @@ export default function FamiliaTaskApp() {
                       </p>
                     )}
                     {taskWeekDays.length > 0 && (
-                      <p className="text-xs text-green-400/80 mt-2">
-                        ✅ {taskWeekDays.length} dia{taskWeekDays.length > 1 ? 's' : ''} selecionado{taskWeekDays.length > 1 ? 's' : ''} por semana
-                      </p>
+                      <>
+                        <p className="text-xs text-green-400/80 mt-2">
+                          ✅ {taskWeekDays.length} dia{taskWeekDays.length > 1 ? 's' : ''} selecionado{taskWeekDays.length > 1 ? 's' : ''}: {taskWeekDays.map(d => ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][d]).join(', ')}
+                        </p>
+                        {taskDueDate && (
+                          <div className="mt-2 p-2 bg-white/5 rounded-lg">
+                            <p className="text-xs text-white/60 mb-1">📅 Próximas datas:</p>
+                            <p className="text-xs text-white/80">
+                              {(() => {
+                                const [y, m, d] = taskDueDate.split('-').map(Number)
+                                const dias = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb']
+                                const getDaysInMonth = (year: number, month: number) => {
+                                  const dpm = [31,28,31,30,31,30,31,31,30,31,30,31]
+                                  if (month === 2 && ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0)) return 29
+                                  return dpm[month - 1]
+                                }
+                                const results: string[] = []
+                                let cy = y, cm = m, cd = d, count = 0
+                                for (let i = 0; i < 60 && count < 6; i++) {
+                                  let tm = cm, ty = cy
+                                  if (tm < 3) { tm += 12; ty -= 1 }
+                                  const k = ty % 100, j = Math.floor(ty / 100)
+                                  let h = (cd + Math.floor((13 * (tm + 1)) / 5) + k + Math.floor(k / 4) + Math.floor(j / 4) - 2 * j) % 7
+                                  if (h < 0) h += 7
+                                  const dow = [6,0,1,2,3,4,5][h]
+                                  if (taskWeekDays.includes(dow)) {
+                                    results.push(`${cd}/${cm} (${dias[dow]})`)
+                                    count++
+                                  }
+                                  cd++
+                                  if (cd > getDaysInMonth(cy, cm)) { cd = 1; cm++; if (cm > 12) { cm = 1; cy++ } }
+                                }
+                                return results.join(', ')
+                              })()}
+                            </p>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
