@@ -373,19 +373,31 @@ export default function FamiliaTaskApp() {
     )
   }
 
-  // Calcular dia da semana usando fórmula de Zeller (sem usar Date)
+  // Calcular dia da semana usando APENAS matemática (Fórmula de Zeller)
+  // Retorna: 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
   const getDayOfWeek = (year: number, month: number, day: number): number => {
-    // Fórmula de Zeller modificada
-    // Retorna: 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
-    if (month < 3) {
-      month += 12
-      year -= 1
+    // Ajuste para fórmula de Zeller: janeiro=13, fevereiro=14 do ano anterior
+    let m = month
+    let y = year
+    if (m < 3) {
+      m += 12
+      y -= 1
     }
-    const k = year % 100
-    const j = Math.floor(year / 100)
-    const h = (day + Math.floor((13 * (month + 1)) / 5) + k + Math.floor(k / 4) + Math.floor(j / 4) - 2 * j) % 7
-    // Converter de Zeller (0=Sáb) para JS (0=Dom)
-    return ((h + 6) % 7)
+    
+    const q = day
+    const k = y % 100
+    const j = Math.floor(y / 100)
+    
+    // Fórmula de Zeller
+    let h = (q + Math.floor((13 * (m + 1)) / 5) + k + Math.floor(k / 4) + Math.floor(j / 4) - 2 * j) % 7
+    
+    // Ajustar valores negativos
+    if (h < 0) h += 7
+    
+    // Zeller retorna: 0=Sáb, 1=Dom, 2=Seg, 3=Ter, 4=Qua, 5=Qui, 6=Sex
+    // Converter para: 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
+    const conversion = [6, 0, 1, 2, 3, 4, 5]
+    return conversion[h]
   }
 
   // Gerar datas futuras baseado na recorrência
