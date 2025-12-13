@@ -528,16 +528,13 @@ export default function FamiliaTaskApp() {
       
       if (editingTask) {
         // Atualizar tarefa existente (só atualiza essa, não cria novas)
-        // Adicionar T12:00:00 para evitar problema de timezone
-        const safeDueDate = taskDueDate ? `${taskDueDate}T12:00:00` : null
-        
         await supabase
           .from('tasks')
           .update({
             title: taskTitle.trim(),
             description: taskDescription.trim() || null,
             category_id: taskCategoryId || null,
-            due_date: safeDueDate,
+            due_date: taskDueDate || null,
             due_time: validTimes[0] || null,
             priority: taskPriority,
             recurrence: taskRecurrence,
@@ -585,10 +582,7 @@ export default function FamiliaTaskApp() {
         // Criar uma tarefa para cada combinação de data + horário
         for (const date of dates) {
           for (const time of timesToUse) {
-            // Adicionar T12:00:00 para evitar problema de timezone
-            // Sem isso, "2025-12-16" vira "2025-12-15" por causa do UTC-3
-            const safeDueDate = date ? `${date}T12:00:00` : null
-            
+            // Salvar data como texto simples (campo agora é text)
             const { data: newTask } = await supabase
               .from('tasks')
               .insert({
@@ -596,7 +590,7 @@ export default function FamiliaTaskApp() {
                 title: taskTitle.trim(),
                 description: taskDescription.trim() || null,
                 category_id: taskCategoryId || null,
-                due_date: safeDueDate,
+                due_date: date || null,
                 due_time: time || null,
                 priority: taskPriority,
                 recurrence: taskRecurrence,
